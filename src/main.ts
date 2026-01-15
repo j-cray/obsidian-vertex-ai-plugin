@@ -6,13 +6,15 @@ interface MastermindSettings {
   projectId: string;
   location: string;
   modelId: string;
+  history: any[];
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
   apiKey: '',
   projectId: '',
   location: 'us-central1',
-  modelId: 'gemini-1.5-pro-preview-0409'
+  modelId: 'gemini-1.5-pro-preview-0409',
+  history: []
 }
 
 export default class MastermindPlugin extends Plugin {

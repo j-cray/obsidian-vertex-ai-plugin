@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer, Component } from 'obsidian';
 import MastermindPlugin from '../main';
 import { VertexService } from '../services/vertex';
 import { VaultService } from '../services/vault';
@@ -60,7 +60,14 @@ export class MastermindChatView extends ItemView {
     });
     sendButton.addEventListener('click', () => this.handleSendMessage());
 
-    this.appendMessage('ai', 'Greetings. I am Mastermind. How can I assist you with your knowledge vault today?');
+    // Load History
+    if (this.plugin.settings.history && this.plugin.settings.history.length > 0) {
+      for (const msg of this.plugin.settings.history) {
+        this.appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.parts[0].text);
+      }
+    } else {
+      this.appendMessage('ai', 'Greetings. I am Mastermind. How can I assist you with your knowledge vault today?');
+    }
   }
 
   async handleSendMessage() {
@@ -73,15 +80,30 @@ export class MastermindChatView extends ItemView {
     const loadingMsg = this.appendMessage('ai', 'Thinking...');
 
     try {
-      // Updated settings check
       this.vertexService.updateSettings(this.plugin.settings);
 
       // Gather context
       const context = await this.vaultService.getRelevantContext(message);
-      const response = await this.vertexService.chat(message, context, this.vaultService);
+
+      // Multimodal: Gather images from active note
+      const images = await this.vaultService.getActiveNoteImages();
+
+      // We pass history and images to vertex service
+      const response = await this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images);
 
       loadingMsg.remove();
       this.appendMessage('ai', response);
+
+      // Update History
+      this.plugin.settings.history.push({ role: 'user', parts: [{ text: message }] });
+      this.plugin.settings.history.push({ role: 'model', parts: [{ text: response }] });
+
+      // Limit history to last 20 turns
+      if (this.plugin.settings.history.length > 40) {
+        this.plugin.settings.history = this.plugin.settings.history.slice(-40);
+      }
+
+      await this.plugin.saveSettings();
     } catch (error) {
       console.error('Mastermind Error:', error);
       loadingMsg.innerText = 'Error: ' + (error instanceof Error ? error.message : String(error));
@@ -91,7 +113,16 @@ export class MastermindChatView extends ItemView {
 
   appendMessage(sender: 'user' | 'ai', text: string): HTMLElement {
     const msgEl = this.messageContainer.createDiv(`chat-message message-${sender}`);
-    msgEl.innerText = text;
+
+    if (sender === 'ai' && text !== 'Thinking...') {
+      // Create a temporary component for markdown rendering
+      const component = new Component();
+      component.load();
+      MarkdownRenderer.render(this.app, text, msgEl, '', component);
+    } else {
+      msgEl.innerText = text;
+    }
+
     this.messageContainer.scrollTop = this.messageContainer.scrollHeight;
     return msgEl;
   }

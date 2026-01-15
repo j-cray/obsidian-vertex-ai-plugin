@@ -59,6 +59,48 @@ export class VaultService {
     throw new Error(`File not found or not a markdown file: ${path}`);
   }
 
+  async getActiveNoteImages(): Promise<{ mimeType: string, data: string }[]> {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) return [];
+
+    const content = await this.app.vault.read(activeFile);
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+    const images: { mimeType: string, data: string }[] = [];
+
+    // Regex for ![[image.png]] or ![](image.png)
+    const wikilinkRegex = /!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|webp))\]\]/gi;
+    const mdlinkRegex = /!\[(?:[^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp))\)/gi;
+
+    const findImages = async (regex: RegExp, content: string) => {
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        const link = match[1];
+        const file = this.app.metadataCache.getFirstLinkpathDest(link, activeFile.path);
+        if (file instanceof TFile && imageExtensions.includes(file.extension.toLowerCase())) {
+          const buffer = await this.app.vault.readBinary(file);
+          const base64 = this.arrayBufferToBase64(buffer);
+          const mimeType = `image/${file.extension === 'jpg' ? 'jpeg' : file.extension}`;
+          images.push({ mimeType, data: base64 });
+        }
+      }
+    };
+
+    await findImages(wikilinkRegex, content);
+    await findImages(mdlinkRegex, content);
+
+    return images;
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
   async searchVault(query: string): Promise<string[]> {
     const queryLower = query.toLowerCase();
     const files = this.app.vault.getMarkdownFiles();

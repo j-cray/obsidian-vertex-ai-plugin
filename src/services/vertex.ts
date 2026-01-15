@@ -17,7 +17,7 @@ export class VertexService {
     this.modelId = settings.modelId;
   }
 
-  async chat(prompt: string, context: string, vaultService: any): Promise<string> {
+  async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
     if (!this.apiKey || !this.projectId) {
       throw new Error('Vertex AI (API Key and Project ID) not configured.');
     }
@@ -76,12 +76,25 @@ You can use tools to search, read, list, and create notes in the vault.`;
       }
     ];
 
-    let contents: any[] = [
-      {
-        role: 'user',
-        parts: [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }]
-      }
-    ];
+    // Combine history and current request
+    let contents: any[] = [...history];
+
+    const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
+
+    // Add images if available
+    for (const img of images) {
+      parts.push({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.data
+        }
+      });
+    }
+
+    contents.push({
+      role: 'user',
+      parts: parts
+    });
 
     // Max 5 turns of tool use to prevent infinite loops
     for (let i = 0; i < 5; i++) {
