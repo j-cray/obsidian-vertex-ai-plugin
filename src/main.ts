@@ -2,16 +2,14 @@ import { Plugin, App, PluginSettingTab, Setting } from 'obsidian';
 import { MastermindChatView, VIEW_TYPE_MASTERMIND } from './views/ChatView';
 
 interface MastermindSettings {
-  apiKey: string;
-  projectId: string;
+  serviceAccountJson: string;
   location: string;
   modelId: string;
   history: any[];
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
-  apiKey: '',
-  projectId: '',
+  serviceAccountJson: '',
   location: 'us-central1',
   modelId: 'gemini-1.5-pro-preview-0409',
   history: []
@@ -119,30 +117,19 @@ class MastermindSettingTab extends PluginSettingTab {
     containerEl.createEl('h2', { text: 'Vertex AI Settings' });
 
     new Setting(containerEl)
-      .setName('API Key')
-      .setDesc('Your Google Cloud API Key')
-      .addText(text => text
-        .setPlaceholder('Enter your API key')
-        .setValue(this.plugin.settings.apiKey)
+      .setName('Service Account JSON')
+      .setDesc('Paste the full content of your Google Cloud Service Account JSON key file.')
+      .addTextArea(text => text
+        .setPlaceholder('{"type": "service_account", ...}')
+        .setValue(this.plugin.settings.serviceAccountJson)
         .onChange(async (value) => {
-          this.plugin.settings.apiKey = value;
-          await this.plugin.saveSettings();
-        }));
-
-    new Setting(containerEl)
-      .setName('Project ID')
-      .setDesc('Your Google Cloud Project ID')
-      .addText(text => text
-        .setPlaceholder('Enter your project ID')
-        .setValue(this.plugin.settings.projectId)
-        .onChange(async (value) => {
-          this.plugin.settings.projectId = value;
+          this.plugin.settings.serviceAccountJson = value;
           await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
       .setName('Location')
-      .setDesc('Vertex AI Location')
+      .setDesc('Vertex AI Location (e.g., us-central1)')
       .addText(text => text
         .setPlaceholder('us-central1')
         .setValue(this.plugin.settings.location)

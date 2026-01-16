@@ -1,34 +1,167 @@
 import { requestUrl } from 'obsidian';
 
 export class VertexService {
-  private apiKey!: string;
-  private projectId!: string;
+  private serviceAccountJson!: string;
   private location!: string;
   private modelId!: string;
+  private accessToken: string | null = null;
+  private tokenExpiry: number = 0;
 
-  constructor(settings: { apiKey: string, projectId: string, location: string, modelId: string }) {
+  constructor(settings: { serviceAccountJson: string, location: string, modelId: string }) {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { apiKey: string, projectId: string, location: string, modelId: string }) {
-    this.apiKey = settings.apiKey;
-    this.projectId = settings.projectId;
+  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string }) {
+    this.serviceAccountJson = settings.serviceAccountJson;
     this.location = settings.location;
     this.modelId = settings.modelId;
+    this.accessToken = null; // Reset token on settings change
+  }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken && Date.now() < this.tokenExpiry) {
+      return this.accessToken;
+    }
+
+    if (!this.serviceAccountJson) {
+      throw new Error('Service Account JSON not configured.');
+    }
+
+    let credentials;
+    try {
+      credentials = JSON.parse(this.serviceAccountJson);
+    } catch (e) {
+      throw new Error('Invalid Service Account JSON format.');
+    }
+
+    if (!credentials.client_email || !credentials.private_key) {
+      throw new Error('Service Account JSON missing client_email or private_key.');
+    }
+
+    const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
+
+    // Exchange JWT for Access Token
+    const response = await requestUrl({
+      url: 'https://oauth2.googleapis.com/token',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
+    });
+
+    if (response.status !== 200) {
+      throw new Error(`Failed to refresh token: ${response.text}`);
+    }
+
+    const data = response.json;
+    this.accessToken = data.access_token;
+    // Set expiry to slightly less than 3600s to be safe
+    this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+
+    return this.accessToken!;
+  }
+
+  private async createSignedJWT(email: string, privateKeyPem: string): Promise<string> {
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const now = Math.floor(Date.now() / 1000);
+    const claim = {
+      iss: email,
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now
+    };
+
+    const encodedHeader = this.base64url(JSON.stringify(header));
+    const encodedClaim = this.base64url(JSON.stringify(claim));
+    const unsignedToken = `${encodedHeader}.${encodedClaim}`;
+
+    const signature = await this.sign(unsignedToken, privateKeyPem);
+    return `${unsignedToken}.${signature}`;
+  }
+
+  private base64url(source: string | ArrayBuffer): string {
+    let encodedSource: string;
+    if (typeof source === 'string') {
+      // Encode purely using native btoa (Latin1 -> Base64)
+      // To handle UTF-8, we must first percent-encode
+      const bytes = new TextEncoder().encode(source);
+      encodedSource = this.arrayBufferToBase64(bytes);
+    } else {
+      encodedSource = this.arrayBufferToBase64(source);
+    }
+
+    return encodedSource.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
+  private async sign(data: string, privateKeyPem: string): Promise<string> {
+    // 1. Convert PEM to binary DER
+    const pemHeader = "-----BEGIN PRIVATE KEY-----";
+    const pemFooter = "-----END PRIVATE KEY-----";
+    const pemContents = privateKeyPem.substring(
+      privateKeyPem.indexOf(pemHeader) + pemHeader.length,
+      privateKeyPem.indexOf(pemFooter)
+    ).replace(/\s/g, ''); // remove newlines/whitespace
+
+    const binaryDerString = window.atob(pemContents);
+    const binaryDer = new Uint8Array(binaryDerString.length);
+    for (let i = 0; i < binaryDerString.length; i++) {
+      binaryDer[i] = binaryDerString.charCodeAt(i);
+    }
+
+    // 2. Import Key
+    const crypto = window.crypto.subtle;
+    const key = await crypto.importKey(
+      "pkcs8",
+      binaryDer.buffer,
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256"
+      },
+      false,
+      ["sign"]
+    );
+
+    // 3. Sign
+    const encoder = new TextEncoder();
+    const dataBytes = encoder.encode(data);
+    const signature = await crypto.sign(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      dataBytes
+    );
+
+    return this.base64url(signature);
   }
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
-    if (!this.apiKey || !this.projectId) {
-      throw new Error('Vertex AI (API Key and Project ID) not configured.');
-    }
+    const accessToken = await this.getAccessToken();
+    const projectId = JSON.parse(this.serviceAccountJson).project_id;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId || 'gemini-1.5-pro'}:generateContent?key=${this.apiKey}`;
+    // Use default if not set
+    const model = this.modelId || 'gemini-1.5-pro-preview-0409';
+    const location = this.location || 'us-central1';
+
+    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
 
     const systemInstruction = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
 Be concise, professional, and insightful.
 Always use the provided context to answer questions if available.
 You can use tools to search, read, list, and create notes in the vault.`;
+
+    // Tool logic is mostly the same, but Vertex format is strict
+    // NOTE: Vertex AI uses specific structure for function declarations different from AI Studio in subtle ways sometimes.
+    // But generally 1.5 Pro is unified. We'll stick to the current format.
 
     const tools = [
       {
@@ -76,12 +209,10 @@ You can use tools to search, read, list, and create notes in the vault.`;
       }
     ];
 
-    // Combine history and current request
+    // Build Request
     let contents: any[] = [...history];
-
     const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
 
-    // Add images if available
     for (const img of images) {
       parts.push({
         inlineData: {
@@ -91,12 +222,9 @@ You can use tools to search, read, list, and create notes in the vault.`;
       });
     }
 
-    contents.push({
-      role: 'user',
-      parts: parts
-    });
+    contents.push({ role: 'user', parts });
 
-    // Max 5 turns of tool use to prevent infinite loops
+    // Loop for tool use
     for (let i = 0; i < 5; i++) {
       const body = {
         contents,
@@ -108,18 +236,27 @@ You can use tools to search, read, list, and create notes in the vault.`;
       const response = await requestUrl({
         url,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
         body: JSON.stringify(body)
       });
 
       if (response.status !== 200) {
-        throw new Error(`API returned status ${response.status}: ${response.text}`);
+        throw new Error(`Vertex AI Error ${response.status}: ${response.text}`);
       }
 
       const data = response.json;
+      if (!data.candidates || data.candidates.length === 0) {
+        throw new Error('No candidates returned from Vertex AI.');
+      }
+
       const candidate = data.candidates[0];
       const part = candidate.content.parts[0];
 
+      // Handle Function Calls
+      // Vertex AI returns `functionCall` inside `part`
       if (part.functionCall) {
         const { name, args } = part.functionCall;
         let result: any;
@@ -139,19 +276,22 @@ You can use tools to search, read, list, and create notes in the vault.`;
           result = { status: 'error', message: err.message };
         }
 
-        contents.push(candidate.content); // Add the function call message
+        // Append Function Call to history
+        // IMPORTANT: Vertex structure requires specific role/part sequences
+        contents.push(candidate.content);
+
+        // Append Function Response
         contents.push({
           role: 'function',
-          parts: [
-            {
-              functionResponse: {
-                name,
-                response: { name, content: result }
-              }
+          parts: [{
+            functionResponse: {
+              name,
+              response: { name, content: result }
             }
-          ]
+          }]
         });
       } else {
+        // Text response
         return part.text;
       }
     }
