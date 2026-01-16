@@ -145,31 +145,63 @@ export class VertexService {
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
 
-    // Vertex AI Model List Endpoint
-    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`;
+    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
+    // Updated: 2026-01-15
+    const FALLBACK_MODELS = [
+      // Gemini 3.0 (Preview/Latest)
+      'gemini-3.0-pro-preview-001',
+      'gemini-3.0-flash-preview-001',
+      'gemini-3.0-pro', // Alias often used
+      'gemini-3.0-flash',
+
+      // Gemini 2.5
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+
+      // Gemini 2.0
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+
+      // Gemini 1.5 (Stable Workhorses)
+      'gemini-1.5-pro-002',
+      'gemini-1.5-flash-002',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro-preview-0409',
+
+      // Gemini 1.0 (Legacy)
+      'gemini-1.0-pro',
+      'gemini-1.0-pro-001'
+    ];
 
     try {
       const response = await requestUrl({
-        url,
+        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
         }
       });
 
-      if (response.status !== 200) {
-        console.error('Failed to list models', response);
-        return [];
-      }
+      if (response.status === 200) {
+        const data = response.json;
+        if (data.models) {
+          const fetched = data.models
+            .map((m: any) => m.name.split('/').pop())
+            .filter((id: string) => id.includes('gemini'));
 
-      const data = response.json;
-      // Filter for Gemini models
-      return data.models
-        ?.filter((m: any) => m.name.includes('gemini') && !m.name.includes('vision')) // Basic filter
-        ?.map((m: any) => m.name.split('/').pop()) || [];
-    } catch (e) {
-      console.error('Error listing models:', e);
-      return [];
+          if (fetched.length > 0) {
+            // Merge fetched with important fallbacks (dedupe)
+            return [...new Set([...fetched, ...FALLBACK_MODELS])].sort();
+          }
+        }
+      }
+      return FALLBACK_MODELS;
+    } catch (error) {
+      console.error('Mastermind: Failed to list models via API, using comprehensive fallback.', error);
+      return FALLBACK_MODELS;
     }
   }
 

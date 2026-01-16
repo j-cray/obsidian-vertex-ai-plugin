@@ -13,6 +13,7 @@ export class MastermindChatView extends ItemView {
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelPickerEl!: HTMLSelectElement;
+  messages: { role: string, parts: { text: string }[] }[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: MastermindPlugin) {
     super(leaf);
@@ -49,9 +50,10 @@ export class MastermindChatView extends ItemView {
     const modelContainer = this.toolbarEl.createDiv('model-picker-container');
     const modelSelect = modelContainer.createEl('select', { cls: 'model-picker' });
 
+    // Ensure sync with main.ts state
     const options = this.plugin.settings.availableModels.length > 0
       ? this.plugin.settings.availableModels
-      : [this.plugin.settings.modelId, 'gemini-1.5-pro', 'gemini-1.5-flash'];
+      : [this.plugin.settings.modelId, 'gemini-3.0-pro-preview-001', 'gemini-2.5-pro', 'gemini-1.5-pro'];
 
     // Deduplicate
     [...new Set(options)].forEach(m => {
@@ -65,15 +67,57 @@ export class MastermindChatView extends ItemView {
       new Notice(`Switched to ${modelSelect.value}`);
     });
 
+    // ACTION BUTTONS CONTAINER
+    const actionsDiv = this.toolbarEl.createDiv({ cls: 'toolbar-actions' });
+    actionsDiv.style.display = 'flex';
+    actionsDiv.style.gap = '8px';
+
+    // NEW CHAT BUTTON
+    const newChatBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
+    newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`; // Plus icon
+    newChatBtn.title = "New Conversation";
+    newChatBtn.onclick = async () => {
+      // Save current history if needed (simple implementation for now)
+      if (this.messages.length > 0) {
+        // Ensure plugin.settings.history is initialized as an array of SavedConversation
+        if (!this.plugin.settings.history || !Array.isArray(this.plugin.settings.history)) {
+          this.plugin.settings.history = [];
+        }
+        this.plugin.settings.history.push({
+          timestamp: Date.now(),
+          title: this.messages[0].parts[0].text.substring(0, 30) + "...", // Use parts[0].text for title
+          messages: [...this.messages]
+        });
+        await this.plugin.saveSettings();
+      }
+
+      // Clear view
+      this.messages = [];
+      this.renderMessages();
+      new Notice("Started new conversation.");
+    };
+
+    // HISTORY BUTTON (Basic View)
+    const historyBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
+    historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>`; // Clock icon
+    historyBtn.title = "History";
+    historyBtn.onclick = () => {
+      // Very basic history modal for now
+      // Ideally utilize a dedicated modal class
+      const savedConversations = this.plugin.settings.history || [];
+      new Notice(`Saved ${savedConversations.length} conversations. History UI coming soon.`);
+    };
+
     // Settings Button
-    const settingsBtn = this.toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-    settingsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
-    settingsBtn.addEventListener('click', () => {
+    const settingsBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
+    settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    settingsBtn.title = "Settings";
+    settingsBtn.onclick = () => {
       // @ts-ignore
       this.app.setting.open();
       // @ts-ignore
       this.app.setting.openTabById(this.plugin.manifest.id);
-    });
+    };
 
     // --- MESSAGES ---
     this.messageContainer = container.createDiv('chat-messages');
@@ -122,12 +166,30 @@ export class MastermindChatView extends ItemView {
     sendButton.addEventListener('click', () => this.handleSendMessage());
 
     // Load History
+    // Load History logic moved to activateView or manual load?
+    // Actually, we shouldn't load the ENTIRE settings.history into view,
+    // because settings.history is the *linear* chat history for the *current* context in the old design.
+    // In the new design, the user wants "conversations".
+    // For now, let's treat settings.history as the "active conversation" persistence.
+
     if (this.plugin.settings.history && this.plugin.settings.history.length > 0) {
-      for (const msg of this.plugin.settings.history) {
+      // Hydrate local messages
+      this.messages = [...this.plugin.settings.history];
+    } else {
+      // Initial greeting handled in renderMessages if empty
+    }
+    this.renderMessages();
+  }
+
+  renderMessages() {
+    this.messageContainer.empty();
+
+    if (this.messages.length === 0) {
+      this.appendMessage('ai', 'Greetings. I am Mastermind. How can I assist you in your vault today?');
+    } else {
+      for (const msg of this.messages) {
         this.appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.parts[0].text);
       }
-    } else {
-      this.appendMessage('ai', 'Greetings. I am Mastermind. How can I assist you in your vault today?');
     }
   }
 
@@ -158,7 +220,11 @@ export class MastermindChatView extends ItemView {
       thinkingContainer.remove(); // Remove thinking animation
       this.appendMessage('ai', response);
 
-      // Update History
+      // Add to local state
+      this.messages.push({ role: 'user', parts: [{ text: message }] });
+      this.messages.push({ role: 'model', parts: [{ text: response }] });
+
+      // Update Persistence (Current Session)
       this.plugin.settings.history.push({ role: 'user', parts: [{ text: message }] });
       this.plugin.settings.history.push({ role: 'model', parts: [{ text: response }] });
 

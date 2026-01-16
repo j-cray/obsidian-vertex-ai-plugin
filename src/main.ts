@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: MastermindSettings = {
   profilePictureAI: 'https://api.dicebear.com/7.x/bottts/svg?seed=Mastermind',
   customContextPrompt: '',
   confirmDestructive: false,
-  defaultModel: 'gemini-1.5-pro-preview-0409',
+  defaultModel: 'gemini-3.0-pro-preview-001', // Precise ID
   availableModels: []
 }
 
@@ -111,6 +111,27 @@ export default class MastermindPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+    // Auto-fetch if configured but empty
+    if (this.settings.serviceAccountJson && this.settings.availableModels.length === 0) {
+      // Run in background to not block startup
+      setTimeout(async () => {
+        const vertex = new VertexService(this.settings);
+        try {
+          const models = await vertex.listModels();
+          if (models.length > 0) {
+            this.settings.availableModels = models;
+            if (!models.includes(this.settings.modelId)) {
+              this.settings.modelId = models[0];
+            }
+            await this.saveSettings();
+            new Notice(`Mastermind: Auto-fetched ${models.length} Gemini models.`);
+          }
+        } catch (e) {
+          console.log("Mastermind: Auto-fetch failed silently.");
+        }
+      }, 2000);
+    }
   }
 
   async saveSettings() {
@@ -212,20 +233,35 @@ class MastermindSettingTab extends PluginSettingTab {
               new Notice(`Fetched ${models.length} models.`);
             } else {
               new Notice('No Gemini models found. Using defaults.');
-              // Fallback
-              const defaults = ['gemini-1.5-pro', 'gemini-1.5-flash'];
+              const defaults = ['gemini-3.0-pro', 'gemini-2.5-pro', 'gemini-1.5-pro'];
               this.plugin.settings.availableModels = defaults;
+              this.plugin.settings.modelId = defaults[0]; // Force default selection
               await this.plugin.saveSettings();
+
               // @ts-ignore
               const dd = this.modelDropdown;
               // @ts-ignore
               dd.selectEl.innerHTML = '';
+              // @ts-ignore
               defaults.forEach(m => dd.addOption(m, m));
               dd.setValue(defaults[0]);
             }
           } catch (e) {
-            new Notice('Failed to fetch models. Check JSON/Region.');
-            console.error(e);
+            new Notice('Failed to fetch models. Using defaults.');
+            console.error('Fetch error:', e);
+
+            const defaults = ['gemini-3.0-pro', 'gemini-2.5-pro', 'gemini-1.5-pro'];
+            this.plugin.settings.availableModels = defaults;
+            this.plugin.settings.modelId = defaults[0];
+            await this.plugin.saveSettings();
+
+            // @ts-ignore
+            const dd = this.modelDropdown;
+            // @ts-ignore
+            dd.selectEl.innerHTML = '';
+            // @ts-ignore
+            defaults.forEach(m => dd.addOption(m, m));
+            dd.setValue(defaults[0]);
           }
         }));
 

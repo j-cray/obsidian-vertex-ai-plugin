@@ -69,19 +69,19 @@
     flex-grow: 1;
     overflow-y: auto;
     padding: 60px 20px 20px 20px;
-    /* Add top padding for toolbar */
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 24px;
+    /* Increased gap for better breathing room */
     scroll-behavior: smooth;
-    user-select: text;
-    /* Ensure selection */
 }
 
 .chat-message-block {
     display: flex;
     gap: 12px;
-    align-items: flex-end;
+    align-items: flex-start;
+    /* Align avatars to top of message */
+    max-width: 100%;
 }
 
 .message-block-user {
@@ -89,36 +89,49 @@
 }
 
 .chat-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    /* Softer square */
     object-fit: cover;
-    border: 2px solid var(--background-modifier-border);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
 }
 
 .chat-message {
-    padding: 12px 16px;
-    border-radius: 12px;
-    max-width: 80%;
-    line-height: 1.5;
-    font-size: 14px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    max-width: 85%;
+    /* Slightly wider */
+    line-height: 1.6;
+    font-size: 15px;
+    /* Slightly larger text */
     position: relative;
     user-select: text;
+    /* Ensure selectable */
+    -webkit-user-select: text;
+    transition: transform 0.2s ease;
 }
 
+/* User Message - Premium Gradient */
 .message-user {
     background: var(--user-msg-bg);
     color: #ffffff;
     border-bottom-right-radius: 4px;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* AI Message - Glass/Card Style */
 .message-ai {
     background: var(--background-secondary);
+    /* Improve contrast and "card" feel */
+    background: rgba(var(--mono-rgb-100), 0.03);
+    border: 1px solid rgba(var(--mono-rgb-100), 0.08);
     color: var(--text-normal);
-    border: var(--glass-border);
     border-bottom-left-radius: 4px;
-    box-shadow: var(--glass-shadow);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(5px);
 }
 
 /* THINKING ANIMATION: Fancy & No Avatar */
@@ -164,32 +177,36 @@
     }
 }
 
-/* INPUT AREA - Overlaid Icons */
+/* INPUT AREA FIXES */
 .chat-input-wrapper {
     background: transparent;
-    /* Changed from background-primary as per request */
     padding: 16px;
     position: relative;
-    /* border-top: 1px solid var(--background-modifier-border); Optional */
 }
 
 .chat-input-container {
     position: relative;
     width: 100%;
+    display: flex;
+    align-items: center;
+    /* Helper for centering */
 }
 
 .chat-input {
     width: 100%;
     resize: none;
-    /* transparent background handled by theme usually, but we want a defined box */
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
-    padding: 12px 50px 12px 100px;
-    /* Left padding for tools, Right for send */
+    border-radius: 16px;
+    /* Rounder inputs */
+    /* Padding: Top/Bottom balanced. Left for icons, Right for send. */
+    padding: 14px 50px 14px 110px;
     color: var(--text-normal);
-    min-height: 48px;
+    min-height: 50px;
     line-height: 1.5;
+    font-size: 15px;
+    /* Flex alignment fix for placeholder? Textarea doesn't flex easily.
+       Padding is key. */
 }
 
 .chat-input:focus {
@@ -197,15 +214,17 @@
     box-shadow: 0 0 0 1px var(--accent-color);
 }
 
-/* OVERLAID ICONS */
+/* OVERLAID ICONS - Perfectly Centered Vertically */
 .chat-features-overlay {
     position: absolute;
-    left: 10px;
+    left: 14px;
     top: 50%;
     transform: translateY(-50%);
     display: flex;
-    gap: 8px;
+    gap: 12px;
     z-index: 5;
+    height: 20px;
+    align-items: center;
 }
 
 .feature-icon {
@@ -213,10 +232,7 @@
     height: 20px;
     color: var(--text-muted);
     cursor: pointer;
-    transition: color 0.2s;
-    /* Use SVG content or mask-image for flat look if possible,
-       but for now we might use simpler text icons or expect SVGs inserted by JS.
-       User asked for "simple flat icons". FontAwesome/Lucide style. */
+    transition: color 0.2s, transform 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -224,36 +240,60 @@
 
 .feature-icon:hover {
     color: var(--text-normal);
+    transform: scale(1.1);
 }
+
 
 .chat-send-button {
     position: absolute;
-    right: 10px;
+    right: 14px;
     top: 50%;
     transform: translateY(-50%);
-    background: var(--accent-color);
+    background: transparent;
     border: none;
     width: 32px;
     height: 32px;
-    border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    transition: transform 0.2s;
+    color: var(--accent-color);
+    padding: 0;
     z-index: 5;
+    box-shadow: none;
+    /* Ensure no shadow/bg */
 }
 
 .chat-send-button:hover {
     transform: translateY(-50%) scale(1.1);
+    /* Keep vertical centering on hover */
+    color: var(--text-normal);
+    background: transparent;
 }
 
 .chat-send-button svg {
-    width: 16px;
-    height: 16px;
-    fill: currentColor;
-    /* Telegram paper plane style adjustments usually handled by the SVG path */
-    margin-left: -2px;
-    /* Visual correction */
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+
+.chat-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.7;
+    /* Ensure placeholder is vertically aligned if line-height matches */
+}
+
+/* Re-fix input padding and alignment */
+.chat-input {
+    width: 100%;
+    resize: none;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 12px 48px 12px 108px;
+    color: var(--text-normal);
+    min-height: 48px;
+    line-height: 1.5;
 }
