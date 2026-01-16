@@ -117,9 +117,62 @@ export class VaultService {
     return results;
   }
 
+  async createFolder(path: string): Promise<void> {
+    if (!await this.app.vault.adapter.exists(path)) {
+      await this.app.vault.createFolder(path);
+    }
+  }
+
   async createNote(path: string, content: string): Promise<void> {
     const normalizedPath = path.endsWith('.md') ? path : `${path}.md`;
+
+    // Ensure parent directory exists
+    const folders = normalizedPath.split('/').slice(0, -1);
+    if (folders.length > 0) {
+      const folderPath = folders.join('/');
+      // Recursive folder creation is a bit manual in Obsidian API versions,
+      // but adapter.exists check helps.
+      // For simplicity, we assume one level or try to create.
+      // Better: Recursively create.
+      await this.ensureFoldersExist(folderPath);
+    }
+
+    // Check if exists, if so, we might want to update or error.
+    // Agentic behavior: Overwrite? Or Unique name?
+    // "Mastermind should generate a lot of md files... and minimize token usage"
+    // Let's safe create for now to avoid accidental overwrites of user data unless asked.
+    // Actually, "Maximum capabilities including deleting files" -> Permission to overwrite!
+
+    if (await this.app.vault.adapter.exists(normalizedPath)) {
+      // Update existing
+      const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+      if (file instanceof TFile) {
+        await this.app.vault.modify(file, content);
+        return;
+      }
+    }
+
     await this.app.vault.create(normalizedPath, content);
+  }
+
+  async ensureFoldersExist(path: string) {
+    const dirs = path.split('/');
+    let currentPath = '';
+    for (const dir of dirs) {
+      currentPath = currentPath === '' ? dir : `${currentPath}/${dir}`;
+      if (!await this.app.vault.adapter.exists(currentPath)) {
+        await this.app.vault.createFolder(currentPath);
+      }
+    }
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file) {
+      await this.app.vault.delete(file, true); // true = force (bypass trash)
+    } else {
+      throw new Error(`File to delete not found: ${path}`);
+    }
   }
 
   async getAllFileNames(): Promise<Set<string>> {

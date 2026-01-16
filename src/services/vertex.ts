@@ -4,17 +4,19 @@ export class VertexService {
   private serviceAccountJson!: string;
   private location!: string;
   private modelId!: string;
+  private customContextPrompt: string = '';
   private accessToken: string | null = null;
   private tokenExpiry: number = 0;
 
-  constructor(settings: { serviceAccountJson: string, location: string, modelId: string }) {
+  constructor(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string }) {
+  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.serviceAccountJson = settings.serviceAccountJson;
     this.location = settings.location;
     this.modelId = settings.modelId;
+    this.customContextPrompt = settings.customContextPrompt;
     this.accessToken = null; // Reset token on settings change
   }
 
@@ -82,8 +84,6 @@ export class VertexService {
   private base64url(source: string | ArrayBuffer): string {
     let encodedSource: string;
     if (typeof source === 'string') {
-      // Encode purely using native btoa (Latin1 -> Base64)
-      // To handle UTF-8, we must first percent-encode
       const bytes = new TextEncoder().encode(source);
       encodedSource = this.arrayBufferToBase64(bytes);
     } else {
@@ -104,13 +104,12 @@ export class VertexService {
   }
 
   private async sign(data: string, privateKeyPem: string): Promise<string> {
-    // 1. Convert PEM to binary DER
     const pemHeader = "-----BEGIN PRIVATE KEY-----";
     const pemFooter = "-----END PRIVATE KEY-----";
     const pemContents = privateKeyPem.substring(
       privateKeyPem.indexOf(pemHeader) + pemHeader.length,
       privateKeyPem.indexOf(pemFooter)
-    ).replace(/\s/g, ''); // remove newlines/whitespace
+    ).replace(/\s/g, '');
 
     const binaryDerString = window.atob(pemContents);
     const binaryDer = new Uint8Array(binaryDerString.length);
@@ -118,7 +117,6 @@ export class VertexService {
       binaryDer[i] = binaryDerString.charCodeAt(i);
     }
 
-    // 2. Import Key
     const crypto = window.crypto.subtle;
     const key = await crypto.importKey(
       "pkcs8",
@@ -131,7 +129,6 @@ export class VertexService {
       ["sign"]
     );
 
-    // 3. Sign
     const encoder = new TextEncoder();
     const dataBytes = encoder.encode(data);
     const signature = await crypto.sign(
@@ -141,6 +138,39 @@ export class VertexService {
     );
 
     return this.base64url(signature);
+  }
+
+  async listModels(): Promise<string[]> {
+    const accessToken = await this.getAccessToken();
+    const projectId = JSON.parse(this.serviceAccountJson).project_id;
+    const location = this.location || 'us-central1';
+
+    // Vertex AI Model List Endpoint
+    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`;
+
+    try {
+      const response = await requestUrl({
+        url,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (response.status !== 200) {
+        console.error('Failed to list models', response);
+        return [];
+      }
+
+      const data = response.json;
+      // Filter for Gemini models
+      return data.models
+        ?.filter((m: any) => m.name.includes('gemini') && !m.name.includes('vision')) // Basic filter
+        ?.map((m: any) => m.name.split('/').pop()) || [];
+    } catch (e) {
+      console.error('Error listing models:', e);
+      return [];
+    }
   }
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
@@ -153,15 +183,15 @@ export class VertexService {
 
     const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
 
-    const systemInstruction = `You are "Mastermind", a highly capable AI assistant for Obsidian.
+    let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
 Be concise, professional, and insightful.
 Always use the provided context to answer questions if available.
-You can use tools to search, read, list, and create notes in the vault.`;
+You can use tools to search, read, list, create, and delete notes/folders in the vault.`;
 
-    // Tool logic is mostly the same, but Vertex format is strict
-    // NOTE: Vertex AI uses specific structure for function declarations different from AI Studio in subtle ways sometimes.
-    // But generally 1.5 Pro is unified. We'll stick to the current format.
+    if (this.customContextPrompt) {
+      systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;
+    }
 
     const tools = [
       {
@@ -204,12 +234,33 @@ You can use tools to search, read, list, and create notes in the vault.`;
               },
               required: ['path', 'content']
             }
+          },
+          {
+            name: 'create_folder',
+            description: 'Creates a new folder.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'The path for the new folder.' }
+              },
+              required: ['path']
+            }
+          },
+          {
+            name: 'delete_file',
+            description: 'Deletes a file or folder. Use with caution.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'The path of the file to delete.' }
+              },
+              required: ['path']
+            }
           }
         ]
       }
     ];
 
-    // Build Request
     let contents: any[] = [...history];
     const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
 
@@ -224,11 +275,10 @@ You can use tools to search, read, list, and create notes in the vault.`;
 
     contents.push({ role: 'user', parts });
 
-    // Loop for tool use
     for (let i = 0; i < 5; i++) {
       const body = {
         contents,
-        system_instruction: { parts: [{ text: systemInstruction }] },
+        system_instruction: { parts: [{ text: systemInstructionText }] },
         tools,
         generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
       };
@@ -249,14 +299,25 @@ You can use tools to search, read, list, and create notes in the vault.`;
 
       const data = response.json;
       if (!data.candidates || data.candidates.length === 0) {
+        // Check if blocked
+        if (data.promptFeedback?.blockReason) {
+          throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
+        }
         throw new Error('No candidates returned from Vertex AI.');
       }
 
       const candidate = data.candidates[0];
+
+      if (candidate.finishReason === 'SAFETY') {
+        throw new Error('Response blocked due to safety settings.');
+      }
+
+      if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        throw new Error('Received empty content from Vertex AI.');
+      }
+
       const part = candidate.content.parts[0];
 
-      // Handle Function Calls
-      // Vertex AI returns `functionCall` inside `part`
       if (part.functionCall) {
         const { name, args } = part.functionCall;
         let result: any;
@@ -271,16 +332,19 @@ You can use tools to search, read, list, and create notes in the vault.`;
           } else if (name === 'create_note') {
             await vaultService.createNote(args.path, args.content);
             result = { status: 'success', message: `Note created at ${args.path}` };
+          } else if (name === 'create_folder') {
+            await vaultService.createFolder(args.path);
+            result = { status: 'success', message: `Folder created at ${args.path}` };
+          } else if (name === 'delete_file') {
+            await vaultService.deleteFile(args.path);
+            result = { status: 'success', message: `File deleted at ${args.path}` };
           }
         } catch (err: any) {
           result = { status: 'error', message: err.message };
         }
 
-        // Append Function Call to history
-        // IMPORTANT: Vertex structure requires specific role/part sequences
         contents.push(candidate.content);
 
-        // Append Function Response
         contents.push({
           role: 'function',
           parts: [{
@@ -291,11 +355,20 @@ You can use tools to search, read, list, and create notes in the vault.`;
           }]
         });
       } else {
-        // Text response
         return part.text;
       }
     }
 
     throw new Error('Maximum tool use iterations reached.');
+  }
+
+  // Helper method to validate JSON
+  validateJSON(json: string): boolean {
+    try {
+      JSON.parse(json);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

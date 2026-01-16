@@ -1,18 +1,32 @@
-import { Plugin, App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, DropdownComponent } from 'obsidian';
 import { MastermindChatView, VIEW_TYPE_MASTERMIND } from './views/ChatView';
+import { VertexService } from './services/vertex';
 
 interface MastermindSettings {
   serviceAccountJson: string;
   location: string;
   modelId: string;
   history: any[];
+  // Mastermind 2.0
+  profilePictureUser: string;
+  profilePictureAI: string;
+  customContextPrompt: string;
+  confirmDestructive: boolean;
+  defaultModel: string;
+  availableModels: string[]; // Cache fetched models
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
   serviceAccountJson: '',
   location: 'us-central1',
   modelId: 'gemini-1.5-pro-preview-0409',
-  history: []
+  history: [],
+  profilePictureUser: 'https://api.dicebear.com/7.x/notionists/svg?seed=User', // Default avatars
+  profilePictureAI: 'https://api.dicebear.com/7.x/bottts/svg?seed=Mastermind',
+  customContextPrompt: '',
+  confirmDestructive: false,
+  defaultModel: 'gemini-1.5-pro-preview-0409',
+  availableModels: []
 }
 
 export default class MastermindPlugin extends Plugin {
@@ -62,8 +76,11 @@ export default class MastermindPlugin extends Plugin {
             const view = leaves[0].view as MastermindChatView;
             if (view) {
               // Manually set input and trigger send
-              view.inputEl.value = `Explain this:\n> ${selection}`;
-              view.handleSendMessage();
+              // Assuming view.inputEl exists, but we need to check
+              if (view.inputEl) {
+                view.inputEl.value = `Explain this:\n> ${selection}`;
+                view.handleSendMessage();
+              }
             }
           }
         }
@@ -103,6 +120,8 @@ export default class MastermindPlugin extends Plugin {
 
 class MastermindSettingTab extends PluginSettingTab {
   plugin: MastermindPlugin;
+  // @ts-ignore
+  private modelDropdown: DropdownComponent;
 
   constructor(app: App, plugin: MastermindPlugin) {
     super(app, plugin);
@@ -127,25 +146,129 @@ class MastermindSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
+    const locations: Record<string, string[]> = {
+      'US': ['us-central1', 'us-east1', 'us-east4', 'us-west1', 'us-west4'],
+      'Europe': ['europe-west1', 'europe-west2', 'europe-west3', 'europe-west4', 'europe-north1'],
+      'Asia': ['asia-east1', 'asia-northeast1', 'asia-southeast1']
+    };
+
     new Setting(containerEl)
-      .setName('Location')
-      .setDesc('Vertex AI Location (e.g., us-central1)')
+      .setName('Vertex AI Region')
+      .setDesc('Select the Google Cloud region for API calls.')
+      .addDropdown(dropdown => {
+        for (const region in locations) {
+          // @ts-ignore
+          const locs = locations[region];
+          locs.forEach((loc: string) => dropdown.addOption(loc, `${region} - ${loc}`));
+        }
+        dropdown.setValue(this.plugin.settings.location)
+          .onChange(async (value) => {
+            this.plugin.settings.location = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    // Model Picker with Fetch
+    new Setting(containerEl)
+      .setName('Gemini Model')
+      .setDesc('Select the Vertex AI model to use. Click refresh to fetch from permissions.')
+      .addDropdown(dropdown => {
+        // Use cached models if available, else just current or default
+        const options = this.plugin.settings.availableModels.length > 0
+          ? this.plugin.settings.availableModels
+          : [this.plugin.settings.modelId, 'gemini-1.5-pro', 'gemini-1.5-flash'];
+
+        // Deduplicate
+        const uniqueOptions = [...new Set(options)];
+
+        uniqueOptions.forEach(m => dropdown.addOption(m, m));
+
+        dropdown.setValue(this.plugin.settings.modelId)
+          .onChange(async (value) => {
+            this.plugin.settings.modelId = value;
+            await this.plugin.saveSettings();
+          });
+        this.modelDropdown = dropdown;
+      })
+      .addExtraButton(btn => btn
+        .setIcon('refresh-cw')
+        .setTooltip('Fetch accessible models')
+        .onClick(async () => {
+          const vertex = new VertexService(this.plugin.settings);
+          try {
+            new Notice('Fetching models...');
+            const models = await vertex.listModels();
+            if (models.length > 0) {
+              const dd = this.modelDropdown;
+              // Clear options
+              // @ts-ignore
+              dd.selectEl.innerHTML = '';
+              models.forEach(m => dd.addOption(m, m));
+              dd.setValue(models[0]);
+
+              this.plugin.settings.modelId = models[0];
+              this.plugin.settings.availableModels = models;
+              await this.plugin.saveSettings();
+              new Notice(`Fetched ${models.length} models.`);
+            } else {
+              new Notice('No Gemini models found. Using defaults.');
+              // Fallback
+              const defaults = ['gemini-1.5-pro', 'gemini-1.5-flash'];
+              this.plugin.settings.availableModels = defaults;
+              await this.plugin.saveSettings();
+              // @ts-ignore
+              const dd = this.modelDropdown;
+              // @ts-ignore
+              dd.selectEl.innerHTML = '';
+              defaults.forEach(m => dd.addOption(m, m));
+              dd.setValue(defaults[0]);
+            }
+          } catch (e) {
+            new Notice('Failed to fetch models. Check JSON/Region.');
+            console.error(e);
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Profile Picture (User)')
+      .setDesc('URL for your avatar.')
       .addText(text => text
-        .setPlaceholder('us-central1')
-        .setValue(this.plugin.settings.location)
+        .setPlaceholder('https://...')
+        .setValue(this.plugin.settings.profilePictureUser)
         .onChange(async (value) => {
-          this.plugin.settings.location = value;
+          this.plugin.settings.profilePictureUser = value;
           await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
-      .setName('Model ID')
-      .setDesc('Vertex AI Model ID')
+      .setName('Profile Picture (AI)')
+      .setDesc('URL for Mastermind\'s avatar.')
       .addText(text => text
-        .setPlaceholder('gemini-1.5-pro-preview-0409')
-        .setValue(this.plugin.settings.modelId)
+        .setPlaceholder('https://...')
+        .setValue(this.plugin.settings.profilePictureAI)
         .onChange(async (value) => {
-          this.plugin.settings.modelId = value;
+          this.plugin.settings.profilePictureAI = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Custom Context Prompt')
+      .setDesc('Additional instructions for the AI (e.g., "Be concise", "Answer in French").')
+      .addTextArea(text => text
+        .setPlaceholder('You are an expert coder...')
+        .setValue(this.plugin.settings.customContextPrompt)
+        .onChange(async (value) => {
+          this.plugin.settings.customContextPrompt = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Confirm Destructive Actions')
+      .setDesc('If enabled, Mastermind will ask before deleting files. Default is OFF (Maximum Power).')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.confirmDestructive)
+        .onChange(async (value) => {
+          this.plugin.settings.confirmDestructive = value;
           await this.plugin.saveSettings();
         }));
   }
