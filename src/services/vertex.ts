@@ -140,9 +140,22 @@ export class VertexService {
     return this.base64url(signature);
   }
 
+  private getProjectId(): string {
+    try {
+      return JSON.parse(this.serviceAccountJson).project_id;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  private getBaseUrl(location: string): string {
+    const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+    return `https://${host}/v1/projects/${this.getProjectId()}/locations/${location}`;
+  }
+
   async listModels(): Promise<string[]> {
     const accessToken = await this.getAccessToken();
-    const projectId = JSON.parse(this.serviceAccountJson).project_id;
+    const projectId = this.getProjectId();
     const location = this.location || 'us-central1';
 
     const FALLBACK_MODELS = [
@@ -160,12 +173,15 @@ export class VertexService {
     let nextPageToken: string | null = null;
 
     try {
+      const baseUrl = this.getBaseUrl(location);
       do {
-        const url = new URL(`https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`);
-        if (nextPageToken) url.searchParams.append('pageToken', nextPageToken);
+        // We try both endpoints: the unified models list and the google publisher list
+        // Unified models list (User tuned, etc.)
+        const urlObj = new URL(`${baseUrl}/models`);
+        if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
 
         const response = await requestUrl({
-          url: url.toString(),
+          url: urlObj.toString(),
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -181,7 +197,35 @@ export class VertexService {
           }
           nextPageToken = data.nextPageToken || null;
         } else {
-          console.error(`Mastermind: API error ${response.status}`, response.text);
+          console.warn(`Mastermind: Unified listModels failed (${response.status})`);
+          break;
+        }
+      } while (nextPageToken);
+
+      // Now fetch from Google publisher (Foundational models)
+      nextPageToken = null;
+      do {
+        const urlObj = new URL(`${baseUrl}/publishers/google/models`);
+        if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+
+        const pubResponse = await requestUrl({
+          url: urlObj.toString(),
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (pubResponse.status === 200) {
+          const data = pubResponse.json;
+          if (data.models) {
+            const fetched = data.models.map((m: any) => m.name.split('/').pop());
+            allModels = [...allModels, ...fetched];
+          }
+          nextPageToken = data.nextPageToken || null;
+        } else {
+          console.warn(`Mastermind: Publisher listModels failed (${pubResponse.status})`);
           break;
         }
       } while (nextPageToken);
@@ -191,10 +235,11 @@ export class VertexService {
       }
       return FALLBACK_MODELS;
     } catch (error) {
-      console.error('Mastermind: Failed to list models via API', error);
+      console.error('Mastermind: Critical failure listing models', error);
       return FALLBACK_MODELS;
     }
   }
+
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
     const accessToken = await this.getAccessToken();
@@ -211,7 +256,8 @@ export class VertexService {
       // Support for Resource Path: projects/123/locations/us-central1/endpoints/456...
       // Or simple ID: 1234567890 (assumed in current project/location)
       const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${location}/endpoints/${modelId}`;
-      const url = `https://${location}-aiplatform.googleapis.com/v1/${endpointResource}:predict`;
+      const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+      const url = `https://${host}/v1/${endpointResource}:predict`;
 
       // Standard MaaS Payload (Mistral/Llama usually accept: { instances: [{ prompt: "..." }], parameters: {...} })
       // or OpenAI-compatible format if deployed with vLLM (check documentation).
@@ -260,7 +306,7 @@ export class VertexService {
     if (isClaude) {
       // Claude typically uses `streamRawPredict` or `rawPredict` on a specific endpoint
       // e.g. https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022:streamRawPredict
-      const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/anthropic/models/${modelId}:streamRawPredict`;
+      const url = `${this.getBaseUrl(location)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
 
       // Construct Claude-specific payload
       const messages = history.map(h => ({
@@ -302,7 +348,7 @@ export class VertexService {
     }
 
     // 2. GOOGLE GEMINI (Default)
-    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+    const url = `${this.getBaseUrl(location)}/publishers/google/models/${modelId}:generateContent`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
