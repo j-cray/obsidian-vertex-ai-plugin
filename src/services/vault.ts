@@ -257,4 +257,17 @@ export class VaultService {
       await this.app.vault.create(path, content);
     }
   }
+
+  async writeLog(message: string): Promise<void> {
+    const logPath = 'Mastermind/Logs/debug.md';
+    let currentContent = '';
+    try {
+      currentContent = await this.getFileContent(logPath);
+    } catch {
+      currentContent = '# Mastermind Debug Logs\n\n';
+    }
+    const timestamp = new Date().toISOString();
+    const newContent = `${currentContent}\n[${timestamp}] ${message}\n`;
+    await this.createOrUpdateNote(logPath, newContent);
+  }
 }

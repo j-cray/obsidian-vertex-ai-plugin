@@ -173,11 +173,10 @@ export class VertexService {
     const accessToken = await this.getAccessToken();
     const projectId = this.getProjectId();
 
-    // For listing, we MUST use a regional location (global often 404s for listing)
+    // Default discovery location to us-central1 if global/undefined, as Model Garden is centralized there
     const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
 
-    // Explicitly notify user about the project ID being used
-    new Notice(`Mastermind: Discovering models for project: ${projectId} in ${discoveryLocation}`);
+    new Notice(`Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`);
 
     const FALLBACK_MODELS = [
       'gemini-2.0-flash-exp',
@@ -190,83 +189,80 @@ export class VertexService {
       'gemini-1.0-pro'
     ];
 
-    let allModels: string[] = [];
+    const foundModels: Set<string> = new Set();
 
-    const fetchModels = async (location: string, version: string = 'v1'): Promise<number> => {
-      const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
-      const projectBaseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
-      const locationBaseUrl = `https://${host}/${version}/locations/${location}`;
-
-      let lastStatus = 0;
-
-      const tryEndpoint = async (baseUrl: string, path: string, key: string, logLabel: string): Promise<void> => {
-        try {
-          const urlObj = new URL(`${baseUrl}/${path}`);
-          const response = await requestUrl({
-            url: urlObj.toString(),
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          lastStatus = response.status;
-          if (response.status === 200) {
-            const data = response.json;
-            if (data[key] && Array.isArray(data[key])) {
-              const fetched = data[key].map((m: any) => m.name.split('/').pop());
-              allModels = [...allModels, ...fetched];
-            } else {
-              console.log(`Mastermind: ${logLabel} (${location}/${version}) returned 200 but no results. Body:`, response.text.substring(0, 100));
-            }
-          } else {
-            console.log(`Mastermind: ${logLabel} (${location}/${version}) failed: ${response.status} for ${urlObj.toString()}`);
+    // Helper: Safe Fetch
+    const safeFetch = async (url: string, label: string): Promise<any[]> => {
+      try {
+        console.log(`Mastermind: Fetching ${label} from ${url}`);
+        const response = await requestUrl({
+          url,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
           }
-        } catch (e: any) {
-          console.log(`Mastermind: ${logLabel} (${location}/${version}) exception: ${e.message}`);
+        });
+
+        if (response.status === 200 && response.json.models) {
+          return response.json.models;
+        } else if (response.status === 200 && response.json.publisherModels) {
+          return response.json.publisherModels;
+        } else {
+          console.warn(`Mastermind: ${label} returned status ${response.status}`);
+          return [];
         }
-      };
-
-      // Try 1: User models (Project-scoped)
-      await tryEndpoint(projectBaseUrl, 'models', 'models', 'UserModels');
-
-      // Try 2: Foundation models (Publisher-scoped, can be project-less or project-scoped)
-      await tryEndpoint(projectBaseUrl, 'publishers/google/models', 'models', 'ProjectPublisherModels');
-      await tryEndpoint(locationBaseUrl, 'publishers/google/models', 'models', 'LocationPublisherModels');
-
-      // Try 3: publisherModels endpoint
-      await tryEndpoint(projectBaseUrl, 'publisherModels', 'publisherModels', 'ProjectPublisherModelsBeta');
-      await tryEndpoint(locationBaseUrl, 'publisherModels', 'publisherModels', 'LocationPublisherModelsBeta');
-
-      return lastStatus;
+      } catch (error) {
+        console.error(`Mastermind: Error fetching ${label}:`, error);
+        return [];
+      }
     };
 
-    try {
-      new Notice(`Mastermind: Discovering models for project: ${projectId}`);
+    // 1. Fetch Publisher Models (Google / Gemini)
+    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1/publishers/google/models
+    // This is the correct, definitive endpoint for foundation models.
+    const publisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/publishers/google/models`;
+    const publisherModels = await safeFetch(publisherUrl, 'Publisher Models');
 
-      // Attempt 1: Current region
-      await fetchModels(discoveryLocation, 'v1');
-      let status = await fetchModels(discoveryLocation, 'v1beta1');
-
-      // Attempt 2: Fallback to us-central1 (Model Garden Hub)
-      if (allModels.length === 0 && discoveryLocation !== 'us-central1') {
-        console.log('Mastermind: Local region failed, trying us-central1 hub...');
-        await fetchModels('us-central1', 'v1');
-        status = await fetchModels('us-central1', 'v1beta1');
+    publisherModels.forEach((m: any) => {
+      // Filter for relevant models (Gemini, PaLM, Codey) to avoid noise
+      const name = m.name.split('/').pop();
+      if (name.includes('gemini') || name.includes('bison') || name.includes('unicorn')) {
+        foundModels.add(name);
       }
+    });
 
-      if (allModels.length > 0) {
-        const uniqueModels = [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
-        new Notice(`Mastermind: Found ${allModels.length} models. Total: ${uniqueModels.length}`);
-        return uniqueModels;
-      }
-      new Notice(`Mastermind: API listing returned 0 models (Last status: ${status}). Using fallback list.`);
-      return FALLBACK_MODELS;
-    } catch (error: any) {
-      console.error('Mastermind: Critical failure listing models', error);
+    // 2. Fetch Project Models (Custom / Tuned)
+    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/models
+    if (projectId) {
+      const projectUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/models`;
+      const projectModels = await safeFetch(projectUrl, 'Project Models');
+
+      projectModels.forEach((m: any) => {
+        const name = m.name.split('/').pop();
+        foundModels.add(name); // Add all custom models
+      });
+    }
+
+    // 3. Fallback / Merge
+    if (foundModels.size === 0) {
+      new Notice(`Mastermind: No models found via API. Using fallback list.`);
       return FALLBACK_MODELS;
     }
+
+    // Ensure our "known good" models are present if they weren't discovered (e.g. if region is weird)
+    // Actually, let's just return what we found, plus the fallbacks if the execution region allows?
+    // User preference: Trust the API, but if API returns nothing useful, assume connectivity issue.
+    // Let's merge found models with fallback models to ensure the user always has a choice,
+    // but put found models first? Or just sort them?
+    // Best UX: Show what is definitely available + known fallbacks.
+
+    // Add defaults to the set to ensure they are available selections
+    FALLBACK_MODELS.forEach(m => foundModels.add(m));
+
+    const finalList = Array.from(foundModels).sort();
+    new Notice(`Mastermind: Discovery complete. Available models: ${finalList.length}`);
+    return finalList;
   }
 
 
@@ -535,7 +531,9 @@ You can use tools to search, read, list, create, and delete notes/folders in the
       });
 
       if (response.status !== 200) {
-        throw new Error(`Vertex AI Error ${response.status}: ${response.text}`);
+        const errorMsg = `Vertex AI Error ${response.status}: ${response.text}`;
+        await vaultService.writeLog(`CHAT ERROR: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
 
       const data = response.json;
@@ -563,8 +561,10 @@ You can use tools to search, read, list, create, and delete notes/folders in the
       const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join('\n');
 
       if (functionCalls.length > 0) {
-        // Prepare to add model's part to context before function responses
+        // Record the model's turn (containing functionCalls)
         contents.push(candidate.content);
+
+        const functionResponseParts: any[] = [];
 
         for (const part of functionCalls) {
           const { name, args } = part.functionCall;
@@ -595,16 +595,20 @@ You can use tools to search, read, list, create, and delete notes/folders in the
             result = { status: 'error', message: err.message };
           }
 
-          contents.push({
-            role: 'function',
-            parts: [{
-              functionResponse: {
-                name,
-                response: { content: result } // Cleaned up redundant name
-              }
-            }]
+          functionResponseParts.push({
+            functionResponse: {
+              name,
+              response: { content: result }
+            }
           });
         }
+
+        // IMPORTANT: Vertex AI REST API requires the role for functionResponse messages to be 'user'
+        contents.push({
+          role: 'user',
+          parts: functionResponseParts
+        });
+
         // After processing all function calls in this turn, loop to get next model turn
         continue;
       } else {
