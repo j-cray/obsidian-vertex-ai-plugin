@@ -216,14 +216,40 @@ export class VaultService {
     return filename.replace('.md', ''); // Return ID for persistence
   }
 
+  async listFolder(path: string): Promise<string[]> {
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    if (!folder || !(folder as any).children) {
+      throw new Error(`Folder not found: ${path}`);
+    }
+    return (folder as any).children.map((child: any) => child.path);
+  }
+
+  async moveFile(oldPath: string, newPath: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(oldPath);
+    if (!file) {
+      throw new Error(`File or folder not found: ${oldPath}`);
+    }
+
+    // Ensure parent directory of newPath exists
+    const folders = newPath.split('/').slice(0, -1);
+    if (folders.length > 0) {
+      await this.ensureFoldersExist(folders.join('/'));
+    }
+
+    await this.app.vault.rename(file, newPath);
+  }
+
   // Improved Implementation: createOrUpdateNote
   async createOrUpdateNote(path: string, content: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) {
       await this.app.vault.modify(file, content);
     } else {
-      // Ensure folders (already handled by ensureFoldersExist usually, but safe to double check)
-      await this.ensureFoldersExist(path.substring(0, path.lastIndexOf('/')));
+      // Ensure folders
+      const lastSlash = path.lastIndexOf('/');
+      if (lastSlash !== -1) {
+        await this.ensureFoldersExist(path.substring(0, lastSlash));
+      }
       await this.app.vault.create(path, content);
     }
   }

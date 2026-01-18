@@ -1,4 +1,4 @@
-import { requestUrl } from 'obsidian';
+import { App, TFile, requestUrl, Notice } from 'obsidian';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -197,7 +197,7 @@ export class VertexService {
           }
           nextPageToken = data.nextPageToken || null;
         } else {
-          console.warn(`Mastermind: Unified listModels failed (${response.status})`);
+          console.warn(`Mastermind: Unified listModels failed (${response.status})`, response.text);
           break;
         }
       } while (nextPageToken);
@@ -205,7 +205,12 @@ export class VertexService {
       // Now fetch from Google publisher (Foundational models)
       nextPageToken = null;
       do {
-        const urlObj = new URL(`${baseUrl}/publishers/google/models`);
+        // Try the foundational models list.
+        // Note: Some models are under /locations/{location}/publishers/google/models
+        // and some under /locations/global/publishers/google/models
+        const pubUrl = `https://${location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`}/v1/publishers/google/models`;
+
+        const urlObj = new URL(pubUrl);
         if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
 
         const pubResponse = await requestUrl({
@@ -225,7 +230,7 @@ export class VertexService {
           }
           nextPageToken = data.nextPageToken || null;
         } else {
-          console.warn(`Mastermind: Publisher listModels failed (${pubResponse.status})`);
+          console.warn(`Mastermind: Publisher listModels failed (${pubResponse.status})`, pubResponse.text);
           break;
         }
       } while (nextPageToken);
@@ -233,9 +238,11 @@ export class VertexService {
       if (allModels.length > 0) {
         return [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
       }
+      new Notice('Mastermind: Could not fetch models from API. Using fallback list.');
       return FALLBACK_MODELS;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Mastermind: Critical failure listing models', error);
+      new Notice(`Mastermind: Model listing error: ${error.message}`);
       return FALLBACK_MODELS;
     }
   }
@@ -369,6 +376,17 @@ You can use tools to search, read, list, create, and delete notes/folders in the
             parameters: { type: 'object', properties: {} }
           },
           {
+            name: 'list_directory',
+            description: 'Lists the contents of a specific directory/folder.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'The path of the folder to list.' }
+              },
+              required: ['path']
+            }
+          },
+          {
             name: 'read_file',
             description: 'Reads the full content of a specified markdown file.',
             parameters: {
@@ -423,6 +441,18 @@ You can use tools to search, read, list, create, and delete notes/folders in the
               },
               required: ['path']
             }
+          },
+          {
+            name: 'move_file',
+            description: 'Moves or renames a file or folder.',
+            parameters: {
+              type: 'object',
+              properties: {
+                oldPath: { type: 'string', description: 'The current path.' },
+                newPath: { type: 'string', description: 'The new path.' }
+              },
+              required: ['oldPath', 'newPath']
+            }
           }
         ]
       }
@@ -442,12 +472,18 @@ You can use tools to search, read, list, create, and delete notes/folders in the
 
     contents.push({ role: 'user', parts });
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 15; i++) {
       const body = {
         contents,
         system_instruction: { parts: [{ text: systemInstructionText }] },
         tools,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
+        ]
       };
 
       const response = await requestUrl({
@@ -499,9 +535,11 @@ You can use tools to search, read, list, create, and delete notes/folders in the
           } else if (name === 'create_note') {
             await vaultService.createNote(args.path, args.content);
             result = { status: 'success', message: `Note created at ${args.path}` };
-          } else if (name === 'create_folder') {
-            await vaultService.createFolder(args.path);
-            result = { status: 'success', message: `Folder created at ${args.path}` };
+          } else if (name === 'list_directory') {
+            result = await vaultService.listFolder(args.path);
+          } else if (name === 'move_file') {
+            await vaultService.moveFile(args.oldPath, args.newPath);
+            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
           } else if (name === 'delete_file') {
             await vaultService.deleteFile(args.path);
             result = { status: 'success', message: `File deleted at ${args.path}` };

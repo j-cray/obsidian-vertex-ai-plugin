@@ -132,10 +132,16 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Fix Visibility of Selection on User Message */
+/* Global Selection Fix */
+::selection {
+    background: rgba(99, 102, 241, 0.3);
+    color: inherit;
+}
+
+/* User Message Selection - High Contrast */
 .message-user ::selection {
-    background: rgba(255, 255, 255, 0.3);
-    color: white;
+    background: rgba(255, 255, 255, 0.4);
+    color: #ffffff;
 }
 
 
