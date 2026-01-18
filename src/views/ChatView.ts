@@ -226,6 +226,19 @@ export class MastermindChatView extends ItemView {
       const response = await this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images);
 
       thinkingContainer.remove(); // Remove thinking animation
+
+      // Parse for tool usage indicators in the text (simple regex for now, or structured if we returned it)
+      // Since vertex.ts just returns the text string, we can't easily separate tools unless we change the return type.
+      // Quicker wins: Inspect the returned string for "Mastermind: Switching to Imagen..." or similar if we logged it to the chat?
+      // No, vertex.ts logs to console/Notice.
+      // Better: VertexService should return an object { text, toolsUsed: [] }.
+      // But preserving the interface: let's stick to text.
+      // However, if the user wants to SEE commands, we can look at the response text or rely on the Notices that VertexService sends.
+      // The user wants "commands run".
+      // Let's rely on Notices for now (VertexService sends them),
+      // OR update VertexService to return a `ChatResponse` object.
+      // Given the complexity of refactoring everything now, let's rely on notices, but MAYBE inject them into the chat flow?
+
       this.appendMessage('ai', response);
 
       // Add to local state

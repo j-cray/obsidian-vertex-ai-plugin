@@ -267,6 +267,7 @@ export class VertexService {
     // Best UX: Show what is definitely available + known fallbacks.
 
     // Add defaults to the set to ensure they are available selections
+    // Add defaults to the set to ensure they are available selections
     FALLBACK_MODELS.forEach(m => foundModels.add(m));
 
     const finalList = Array.from(foundModels).sort();
@@ -469,6 +470,17 @@ Then provide your final answer.`;
       {
         function_declarations: [
           {
+            name: 'generate_image',
+            description: 'Generates an image based on a prompt using Imagen 3. Use this when the user asks to draw, paint, or create an image.',
+            parameters: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string', description: 'The visual description of the image to generate.' }
+              },
+              required: ['prompt']
+            }
+          },
+          {
             name: 'list_files',
             description: 'Lists all markdown files in the vault.',
             parameters: { type: 'object', properties: {} }
@@ -570,6 +582,8 @@ Then provide your final answer.`;
 
     contents.push({ role: 'user', parts });
 
+    let executedActions: string[] = [];
+
     for (let i = 0; i < 15; i++) {
       const body = {
         contents,
@@ -636,27 +650,42 @@ Then provide your final answer.`;
 
           try {
             console.log(`Mastermind: Executing tool ${name}`, args);
-            if (name === 'list_files') {
+            // Agentic: Handlers
+            if (name === 'generate_image') {
+              new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
+              console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
+              const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
+              result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
+              executedActions.push(`Generated image with **Imagen 3**: "${args.prompt}"`);
+            } else if (name === 'list_files') {
               result = await vaultService.listMarkdownFiles();
+              executedActions.push(`Listed vault files.`);
             } else if (name === 'read_file') {
               result = await vaultService.getFileContent(args.path);
+              executedActions.push(`Read file: \`${args.path}\``);
             } else if (name === 'search_content') {
               result = await vaultService.searchVault(args.query);
+              executedActions.push(`Searched vault for: "${args.query}"`);
             } else if (name === 'create_note') {
               await vaultService.createNote(args.path, args.content);
               result = { status: 'success', message: `Note created at ${args.path}` };
+              executedActions.push(`Created note: \`${args.path}\``);
             } else if (name === 'list_directory') {
               result = await vaultService.listFolder(args.path);
+              executedActions.push(`Listed directory: \`${args.path}\``);
             } else if (name === 'move_file') {
               await vaultService.moveFile(args.oldPath, args.newPath);
               result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+              executedActions.push(`Moved file \`${args.oldPath}\` to \`${args.newPath}\``);
             } else if (name === 'delete_file') {
               await vaultService.deleteFile(args.path);
               result = { status: 'success', message: `File deleted at ${args.path}` };
+              executedActions.push(`Deleted file: \`${args.path}\``);
             }
           } catch (err: any) {
             console.error(`Mastermind: Tool ${name} error`, err);
             result = { status: 'error', message: err.message };
+            executedActions.push(`Failed to execute ${name}: ${err.message}`);
           }
 
           functionResponseParts.push({
@@ -677,11 +706,53 @@ Then provide your final answer.`;
         continue;
       } else {
         // No function calls, return the text
+        // Prepend executed actions if any
+        if (executedActions.length > 0) {
+          const actionsBlock = executedActions.map(a => `> [!NOTE] Action\n> ${a}`).join('\n\n');
+          return `${actionsBlock}\n\n${textParts || ''}`;
+        }
         return textParts || 'Empty response from model.';
       }
     }
 
     throw new Error('Maximum tool use iterations reached.');
+  }
+
+  // Helper: Generate Image (Imagen 3)
+  private async generateImageInternal(prompt: string, accessToken: string, projectId: string, location: string, vaultService: any): Promise<string> {
+    // Use 'imagen-3.0-generate-001' as default for auto-switching
+    const modelId = 'imagen-3.0-generate-001';
+    const url = `${this.getBaseUrl(location)}/publishers/google/models/${modelId}:predict`;
+
+    const body = {
+      instances: [
+        { prompt: prompt }
+      ],
+      parameters: {
+        sampleCount: 1,
+      }
+    };
+
+    const response = await requestUrl({
+      url,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (response.status !== 200) {
+      throw new Error(`Imagen Error ${response.status}: ${response.text}`);
+    }
+
+    const data = response.json;
+    if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
+      const base64 = data.predictions[0].bytesBase64Encoded;
+      return await vaultService.saveImage(base64);
+    }
+    throw new Error('No image data returned from Imagen.');
   }
 
   // Helper method to validate JSON
