@@ -393,7 +393,9 @@ export class VertexService {
     }
 
     // 2. GOOGLE GEMINI (Default)
-    const url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:generateContent`;
+    // Use v1beta1 for preview/experimental models (like Gemini 3.0), v1 for stable.
+    const apiVersion = (modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
+    const url = `${this.getBaseUrl(effectiveLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:generateContent`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
