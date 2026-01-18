@@ -179,6 +179,10 @@ export class VertexService {
     new Notice(`Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`);
 
     const FALLBACK_MODELS = [
+      'gemini-3.0-pro-preview',
+      'gemini-3.0-flash-preview',
+      'gemini-3.0-pro-001',
+      'gemini-3.0-flash-001',
       'gemini-2.0-flash-exp',
       'gemini-2.0-flash-001',
       'gemini-2.0-pro-exp-02-05',
