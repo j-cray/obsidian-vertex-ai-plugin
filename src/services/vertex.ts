@@ -7,6 +7,8 @@ export class VertexService {
   private customContextPrompt: string = '';
   private accessToken: string | null = null;
   private tokenExpiry: number = 0;
+  private isRefreshingToken: boolean = false;
+  private tokenRefreshPromise: Promise<string> | null = null;
 
   constructor(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.updateSettings(settings);
@@ -25,41 +27,55 @@ export class VertexService {
       return this.accessToken;
     }
 
-    if (!this.serviceAccountJson) {
-      throw new Error('Service Account JSON not configured.');
+    if (this.isRefreshingToken && this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
     }
 
-    let credentials;
-    try {
-      credentials = JSON.parse(this.serviceAccountJson);
-    } catch (e) {
-      throw new Error('Invalid Service Account JSON format.');
-    }
+    this.isRefreshingToken = true;
+    this.tokenRefreshPromise = (async () => {
+      try {
+        if (!this.serviceAccountJson) {
+          throw new Error('Service Account JSON not configured.');
+        }
 
-    if (!credentials.client_email || !credentials.private_key) {
-      throw new Error('Service Account JSON missing client_email or private_key.');
-    }
+        let credentials;
+        try {
+          credentials = JSON.parse(this.serviceAccountJson);
+        } catch (e) {
+          throw new Error('Invalid Service Account JSON format.');
+        }
 
-    const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
+        if (!credentials.client_email || !credentials.private_key) {
+          throw new Error('Service Account JSON missing client_email or private_key.');
+        }
 
-    // Exchange JWT for Access Token
-    const response = await requestUrl({
-      url: 'https://oauth2.googleapis.com/token',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
-    });
+        const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
 
-    if (response.status !== 200) {
-      throw new Error(`Failed to refresh token: ${response.text}`);
-    }
+        // Exchange JWT for Access Token
+        const response = await requestUrl({
+          url: 'https://oauth2.googleapis.com/token',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
+        });
 
-    const data = response.json;
-    this.accessToken = data.access_token;
-    // Set expiry to slightly less than 3600s to be safe
-    this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+        if (response.status !== 200) {
+          throw new Error(`Failed to refresh token: ${response.text}`);
+        }
 
-    return this.accessToken!;
+        const data = response.json;
+        this.accessToken = data.access_token;
+        // Set expiry to slightly less than 3600s to be safe
+        this.tokenExpiry = Date.now() + (data.expires_in - 120) * 1000;
+
+        return this.accessToken!;
+      } finally {
+        this.isRefreshingToken = false;
+        this.tokenRefreshPromise = null;
+      }
+    })();
+
+    return this.tokenRefreshPromise;
   }
 
   private async createSignedJWT(email: string, privateKeyPem: string): Promise<string> {
@@ -220,11 +236,9 @@ export class VertexService {
       await tryEndpoint(projectBaseUrl, 'publishers/google/models', 'models', 'ProjectPublisherModels');
       await tryEndpoint(locationBaseUrl, 'publishers/google/models', 'models', 'LocationPublisherModels');
 
-      // Try 3: publisherModels endpoint (v1beta1 only)
-      if (version === 'v1beta1') {
-        await tryEndpoint(projectBaseUrl, 'publisherModels', 'publisherModels', 'ProjectPublisherModelsBeta');
-        await tryEndpoint(locationBaseUrl, 'publisherModels', 'publisherModels', 'LocationPublisherModelsBeta');
-      }
+      // Try 3: publisherModels endpoint
+      await tryEndpoint(projectBaseUrl, 'publisherModels', 'publisherModels', 'ProjectPublisherModelsBeta');
+      await tryEndpoint(locationBaseUrl, 'publisherModels', 'publisherModels', 'LocationPublisherModelsBeta');
 
       return lastStatus;
     };
@@ -260,19 +274,34 @@ export class VertexService {
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
     const accessToken = await this.getAccessToken();
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
+    const location = this.location || 'us-central1';
+
+    try {
+      return await this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
+    } catch (error: any) {
+      // Automatic Fallback to us-central1 for 404 or certain model errors
+      if (location !== 'us-central1' && (error.message.includes('404') || error.message.includes('not found'))) {
+        console.log(`Mastermind: Chat failed in ${location}, falling back to us-central1...`);
+        return await this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1');
+      }
+      throw error;
+    }
+  }
+
+  private async chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string): Promise<string> {
 
     // Model Selection
     const modelId = this.modelId || 'gemini-2.0-flash-exp';
     const isClaude = modelId.startsWith('claude');
     const isEndpoint = /^\d+$/.test(modelId) || modelId.includes('/endpoints/'); // Numeric ID or full resource path
-    const location = this.location || 'us-central1';
+    const effectiveLocation = location || 'us-central1';
 
     // 1. CUSTOM ENDPOINT (Mistral, Llama, Fine-tunes deployed in Garden)
     if (isEndpoint) {
       // Support for Resource Path: projects/123/locations/us-central1/endpoints/456...
       // Or simple ID: 1234567890 (assumed in current project/location)
-      const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${location}/endpoints/${modelId}`;
-      const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+      const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
+      const host = effectiveLocation === 'global' ? 'aiplatform.googleapis.com' : `${effectiveLocation}-aiplatform.googleapis.com`;
       const url = `https://${host}/v1/${endpointResource}:predict`;
 
       // Standard MaaS Payload (Mistral/Llama usually accept: { instances: [{ prompt: "..." }], parameters: {...} })
@@ -322,7 +351,7 @@ export class VertexService {
     if (isClaude) {
       // Claude typically uses `streamRawPredict` or `rawPredict` on a specific endpoint
       // e.g. https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022:streamRawPredict
-      const url = `${this.getBaseUrl(location)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
+      const url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
 
       // Construct Claude-specific payload
       const messages = history.map(h => ({
@@ -364,7 +393,7 @@ export class VertexService {
     }
 
     // 2. GOOGLE GEMINI (Default)
-    const url = `${this.getBaseUrl(location)}/publishers/google/models/${modelId}:generateContent`;
+    const url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:generateContent`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.

@@ -236,6 +236,10 @@ export class VaultService {
       await this.ensureFoldersExist(folders.join('/'));
     }
 
+    if (await this.app.vault.adapter.exists(newPath)) {
+      throw new Error(`A file or folder already exists at the destination path: ${newPath}`);
+    }
+
     await this.app.vault.rename(file, newPath);
   }
 

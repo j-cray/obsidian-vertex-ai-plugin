@@ -252,11 +252,23 @@ export class MastermindChatView extends ItemView {
       const sessionId = await (this.vaultService as any).writeHistory(this.plugin.settings.history, (this as any).sessionId);
       (this as any).sessionId = sessionId; // Store for next update
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Mastermind Error:', error);
       thinkingContainer.remove();
-      // Show error message
-      this.appendMessage('ai', `**Error**: ${error instanceof Error ? error.message : String(error)}`);
+
+      // Show descriptive error message
+      let errorMessage = error instanceof Error ? error.message : String(error);
+      let helpfulTip = '';
+
+      if (errorMessage.includes('404')) {
+        helpfulTip = '\n\n**Tip**: This often means the model or project ID is incorrect, or the model is not available in the selected region. Try switching to `us-central1`.';
+      } else if (errorMessage.includes('403') || errorMessage.includes('permission')) {
+        helpfulTip = '\n\n**Tip**: Check if your Service Account has the "Vertex AI User" role in the Google Cloud Console.';
+      } else if (errorMessage.includes('JSON')) {
+        helpfulTip = '\n\n**Tip**: Ensure your Service Account JSON is pasted correctly in the plugin settings.';
+      }
+
+      this.appendMessage('ai', `**Error**: ${errorMessage}${helpfulTip}`);
       new Notice('Mastermind Chat failed.');
     }
   }
