@@ -396,7 +396,7 @@ export class VertexService {
     const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
 
     // Gemini 3 Preview is often strictly us-central1 or global. Force us-central1 if user is elsewhere.
-    const runLocation = isGemini3 ? 'us-central1' : effectiveLocation;
+    const runLocation = isGemini3 ? 'global' : effectiveLocation;
 
     const url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:generateContent`;
 
