@@ -190,6 +190,7 @@ class MastermindSettingTab extends PluginSettingTab {
         }));
 
     const locations: Record<string, string[]> = {
+      'Global': ['global'],
       'US': ['us-central1', 'us-east1', 'us-east4', 'us-west1', 'us-west4'],
       'Europe': ['europe-west1', 'europe-west2', 'europe-west3', 'europe-west4', 'europe-north1'],
       'Asia': ['asia-east1', 'asia-northeast1', 'asia-southeast1']

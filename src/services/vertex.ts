@@ -145,53 +145,53 @@ export class VertexService {
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
 
-    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
-    // Updated: 2026-01-15
-    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
-    // Updated: 2026-01-15 - Confirmed IDs
     const FALLBACK_MODELS = [
-      // Gemini 3.0 (Preview)
-      'gemini-3-pro-preview', // Correct ID
+      'gemini-3-pro-preview',
       'gemini-3-flash-preview',
-
-      // Gemini 2.0 (Commonly cited)
       'gemini-2.0-flash-exp',
-
-      // Gemini 1.5 (Stable)
       'gemini-1.5-pro',
       'gemini-1.5-flash',
       'gemini-1.5-pro-002',
       'gemini-1.5-flash-002',
-
-      // Legacy
       'gemini-1.0-pro'
     ];
 
+    let allModels: string[] = [];
+    let nextPageToken: string | null = null;
+
     try {
-      const response = await requestUrl({
-        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      do {
+        const url = new URL(`https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`);
+        if (nextPageToken) url.searchParams.append('pageToken', nextPageToken);
 
-      if (response.status === 200) {
-        const data = response.json;
-        if (data.models) {
-          const fetched = data.models
-            .map((m: any) => m.name.split('/').pop());
-
-          if (fetched.length > 0) {
-            // Merge fetched with important fallbacks (dedupe)
-            return [...new Set([...fetched, ...FALLBACK_MODELS])].sort();
+        const response = await requestUrl({
+          url: url.toString(),
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
           }
+        });
+
+        if (response.status === 200) {
+          const data = response.json;
+          if (data.models) {
+            const fetched = data.models.map((m: any) => m.name.split('/').pop());
+            allModels = [...allModels, ...fetched];
+          }
+          nextPageToken = data.nextPageToken || null;
+        } else {
+          console.error(`Mastermind: API error ${response.status}`, response.text);
+          break;
         }
+      } while (nextPageToken);
+
+      if (allModels.length > 0) {
+        return [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
       }
       return FALLBACK_MODELS;
     } catch (error) {
-      console.error('Mastermind: Failed to list models via API, using comprehensive fallback.', error);
+      console.error('Mastermind: Failed to list models via API', error);
       return FALLBACK_MODELS;
     }
   }
