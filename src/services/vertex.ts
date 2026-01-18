@@ -179,10 +179,8 @@ export class VertexService {
     new Notice(`Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`);
 
     const FALLBACK_MODELS = [
-      'gemini-3.0-pro-preview',
-      'gemini-3.0-flash-preview',
-      'gemini-3.0-pro-001',
-      'gemini-3.0-flash-001',
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
       'gemini-2.0-flash-exp',
       'gemini-2.0-flash-001',
       'gemini-2.0-pro-exp-02-05',
@@ -394,8 +392,13 @@ export class VertexService {
 
     // 2. GOOGLE GEMINI (Default)
     // Use v1beta1 for preview/experimental models (like Gemini 3.0), v1 for stable.
-    const apiVersion = (modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
-    const url = `${this.getBaseUrl(effectiveLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:generateContent`;
+    const isGemini3 = modelId.includes('gemini-3');
+    const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
+
+    // Gemini 3 Preview is often strictly us-central1 or global. Force us-central1 if user is elsewhere.
+    const runLocation = isGemini3 ? 'us-central1' : effectiveLocation;
+
+    const url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:generateContent`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
