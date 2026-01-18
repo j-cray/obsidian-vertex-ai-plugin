@@ -179,16 +179,23 @@ export class VertexService {
     new Notice(`Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`);
 
     const FALLBACK_MODELS = [
+      // GEMINI 3 (Preview - Global Only)
       'gemini-3-pro-preview',
       'gemini-3-flash-preview',
-      'gemini-2.0-flash-exp',
+
+      // GEMINI 2.0 (Latest)
       'gemini-2.0-flash-001',
+      'gemini-2.0-flash-lite-preview-02-05',
       'gemini-2.0-pro-exp-02-05',
+      'gemini-2.0-flash-thinking-exp-01-21', // Reasoning model
+
+      // GEMINI 1.5 (Stable)
       'gemini-1.5-pro',
       'gemini-1.5-flash',
-      'gemini-1.5-pro-002',
-      'gemini-1.5-flash-002',
-      'gemini-1.0-pro'
+
+      // IMAGEN 3 (Image Generation)
+      'imagen-3.0-generate-001',
+      'imagen-3.0-fast-generate-001'
     ];
 
     const foundModels: Set<string> = new Set();
@@ -393,7 +400,49 @@ export class VertexService {
     // 2. GOOGLE GEMINI (Default)
     // Use v1beta1 for preview/experimental models (like Gemini 3.0), v1 for stable.
     const isGemini3 = modelId.includes('gemini-3');
+    const isImagen = modelId.includes('imagen');
     const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
+
+    // IMAGEN 3 (Image Generation)
+    if (isImagen) {
+      const url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:predict`;
+
+      const body = {
+        instances: [
+          { prompt: prompt }
+        ],
+        parameters: {
+          sampleCount: 1,
+          // aspectRatio: '1:1' // Optional, could be configurable
+        }
+      };
+
+      new Notice('Mastermind: Generating image...');
+
+      const response = await requestUrl({
+        url,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (response.status !== 200) {
+        throw new Error(`Imagen Error ${response.status}: ${response.text}`);
+      }
+
+      const data = response.json;
+      // Imagen response: { predictions: [ { bytesBase64Encoded: "..." } ] }
+      if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
+        const base64 = data.predictions[0].bytesBase64Encoded;
+        const link = await vaultService.saveImage(base64);
+        return `Here is your generated image:\n\n${link}`;
+      }
+
+      throw new Error('No image data returned from Imagen.');
+    }
 
     // Gemini 3 Preview is often strictly us-central1 or global. Force us-central1 if user is elsewhere.
     const runLocation = isGemini3 ? 'global' : effectiveLocation;
@@ -404,7 +453,13 @@ export class VertexService {
 You have access to the user's notes and knowledge vault.
 Be concise, professional, and insightful.
 Always use the provided context to answer questions if available.
-You can use tools to search, read, list, create, and delete notes/folders in the vault.`;
+You can use tools to search, read, list, create, and delete notes/folders in the vault.
+
+IMPORTANT: If you need to reason through a complex problem, show your work by wrapping your thought process in a "thinking" code block, like this:
+\`\`\`thinking
+My reasoning process...
+\`\`\`
+Then provide your final answer.`;
 
     if (this.customContextPrompt) {
       systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;

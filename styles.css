@@ -323,3 +323,27 @@
     min-height: 48px;
     line-height: 1.5;
 }
+
+/* THINKING BLOCKS */
+.markdown-preview-view pre.language-thinking,
+.markdown-source-view .cm-line .cm-thinking {
+    background-color: rgba(var(--mono-rgb-100), 0.03) !important;
+    border-left: 3px solid var(--accent-color) !important;
+    border-radius: 4px;
+    padding: 8px 12px !important;
+    color: var(--text-muted) !important;
+    font-style: italic;
+    font-family: 'Inter', var(--font-interface), sans-serif !important; /* Use interface font for thoughts, not code font */
+}
+
+/* Hide the "thinking" language label if possible, or style it */
+.markdown-preview-view pre.language-thinking:before {
+    content: "Thinking Process";
+    display: block;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    color: var(--accent-color);
+    opacity: 0.8;
+}

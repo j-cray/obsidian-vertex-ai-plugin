@@ -270,4 +270,35 @@ export class VaultService {
     const newContent = `${currentContent}\n[${timestamp}] ${message}\n`;
     await this.createOrUpdateNote(logPath, newContent);
   }
+
+  async saveImage(base64Data: string): Promise<string> {
+    const folder = 'Mastermind_Images';
+    await this.ensureFoldersExist(folder);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `Generated-${timestamp}.png`;
+    const filepath = `${folder}/${filename}`;
+
+    const buffer = this.base64ToArrayBuffer(base64Data);
+
+    // Check if file exists (unlikely with timestamp)
+    if (await this.app.vault.adapter.exists(filepath)) {
+      // Logic to handle overwrite/rename if needed, but timestamp should be unique enough
+    }
+
+    await this.app.vault.createBinary(filepath, buffer);
+
+    // Return markdown link
+    return `![Generated Image](${filepath})`;
+  }
+
+  private base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
 }
