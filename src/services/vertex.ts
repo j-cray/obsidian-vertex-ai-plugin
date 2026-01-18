@@ -165,9 +165,9 @@ export class VertexService {
     const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
 
     const FALLBACK_MODELS = [
-      'gemini-3-pro-preview',
-      'gemini-3-flash-preview',
       'gemini-2.0-flash-exp',
+      'gemini-2.0-flash-001',
+      'gemini-2.0-pro-exp-02-05',
       'gemini-1.5-pro',
       'gemini-1.5-flash',
       'gemini-1.5-pro-002',
@@ -179,11 +179,12 @@ export class VertexService {
 
     const fetchModels = async (location: string, version: string = 'v1'): Promise<number> => {
       const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
-      const baseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
+      const projectBaseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
+      const locationBaseUrl = `https://${host}/${version}/locations/${location}`;
 
       let lastStatus = 0;
 
-      const tryEndpoint = async (path: string, key: string, logLabel: string): Promise<void> => {
+      const tryEndpoint = async (baseUrl: string, path: string, key: string, logLabel: string): Promise<void> => {
         try {
           const urlObj = new URL(`${baseUrl}/${path}`);
           const response = await requestUrl({
@@ -202,37 +203,42 @@ export class VertexService {
               const fetched = data[key].map((m: any) => m.name.split('/').pop());
               allModels = [...allModels, ...fetched];
             } else {
-              console.log(`Mastermind: ${logLabel} (${location}/${version}) empty or no '${key}' key. Body:`, response.text.substring(0, 200));
+              console.log(`Mastermind: ${logLabel} (${location}/${version}) returned 200 but no results. Body:`, response.text.substring(0, 100));
             }
           } else {
-            console.log(`Mastermind: ${logLabel} (${location}/${version}) failed: ${response.status}`);
+            console.log(`Mastermind: ${logLabel} (${location}/${version}) failed: ${response.status} for ${urlObj.toString()}`);
           }
         } catch (e: any) {
           console.log(`Mastermind: ${logLabel} (${location}/${version}) exception: ${e.message}`);
         }
       };
 
-      // Pass 1: User models (v1)
-      await tryEndpoint('models', 'models', 'UserModels');
+      // Try 1: User models (Project-scoped)
+      await tryEndpoint(projectBaseUrl, 'models', 'models', 'UserModels');
 
-      // Pass 2: Publisher models (v1beta1 only)
+      // Try 2: Foundation models (Publisher-scoped, can be project-less or project-scoped)
+      await tryEndpoint(projectBaseUrl, 'publishers/google/models', 'models', 'ProjectPublisherModels');
+      await tryEndpoint(locationBaseUrl, 'publishers/google/models', 'models', 'LocationPublisherModels');
+
+      // Try 3: publisherModels endpoint (v1beta1 only)
       if (version === 'v1beta1') {
-        await tryEndpoint('publisherModels', 'publisherModels', 'PublisherModels');
+        await tryEndpoint(projectBaseUrl, 'publisherModels', 'publisherModels', 'ProjectPublisherModelsBeta');
+        await tryEndpoint(locationBaseUrl, 'publisherModels', 'publisherModels', 'LocationPublisherModelsBeta');
       }
 
       return lastStatus;
     };
 
     try {
-      new Notice(`Mastermind: Listing models for project: ${projectId}`);
+      new Notice(`Mastermind: Discovering models for project: ${projectId}`);
 
-      // Attempt 1: Current region, v1 (User) + v1beta1 (Publisher)
+      // Attempt 1: Current region
       await fetchModels(discoveryLocation, 'v1');
       let status = await fetchModels(discoveryLocation, 'v1beta1');
 
-      // Attempt 2: Fallback to us-central1 if still empty
+      // Attempt 2: Fallback to us-central1 (Model Garden Hub)
       if (allModels.length === 0 && discoveryLocation !== 'us-central1') {
-        console.log('Mastermind: Local region empty, falling back to us-central1 discovery...');
+        console.log('Mastermind: Local region failed, trying us-central1 hub...');
         await fetchModels('us-central1', 'v1');
         status = await fetchModels('us-central1', 'v1beta1');
       }
