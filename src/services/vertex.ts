@@ -156,7 +156,8 @@ export class VertexService {
   async listModels(): Promise<string[]> {
     const accessToken = await this.getAccessToken();
     const projectId = this.getProjectId();
-    const location = this.location || 'us-central1';
+    // For listing, we MUST use a regional location (global often 404s for listing)
+    const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
 
     const FALLBACK_MODELS = [
       'gemini-3-pro-preview',
@@ -170,82 +171,88 @@ export class VertexService {
     ];
 
     let allModels: string[] = [];
-    let nextPageToken: string | null = null;
+
+    const fetchModels = async (location: string, version: string = 'v1'): Promise<void> => {
+      const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+      const baseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
+
+      let nextPageToken: string | null = null;
+      try {
+        do {
+          const urlObj = new URL(`${baseUrl}/models`);
+          if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+
+          const response = await requestUrl({
+            url: urlObj.toString(),
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.status === 200 && response.json.models) {
+            const fetched = response.json.models.map((m: any) => m.name.split('/').pop());
+            allModels = [...allModels, ...fetched];
+            nextPageToken = response.json.nextPageToken || null;
+          } else {
+            console.warn(`Mastermind: listModels Try (${location}/${version}) failed: ${response.status}`);
+            break;
+          }
+        } while (nextPageToken);
+
+        nextPageToken = null;
+        do {
+          const urlObj = new URL(`${baseUrl}/publishers/google/models`);
+          if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+
+          const response = await requestUrl({
+            url: urlObj.toString(),
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.status === 200 && response.json.models) {
+            const fetched = response.json.models.map((m: any) => m.name.split('/').pop());
+            allModels = [...allModels, ...fetched];
+            nextPageToken = response.json.nextPageToken || null;
+          } else {
+            console.warn(`Mastermind: Publisher listModels Try (${location}/${version}) failed: ${response.status}`);
+            break;
+          }
+        } while (nextPageToken);
+      } catch (e: any) {
+        console.warn(`Mastermind: listModels exception (${location}/${version}): ${e.message}`);
+      }
+    };
 
     try {
-      const baseUrl = this.getBaseUrl(location);
-      do {
-        // We try both endpoints: the unified models list and the google publisher list
-        // Unified models list (User tuned, etc.)
-        const urlObj = new URL(`${baseUrl}/models`);
-        if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+      // Try 1: Discovery location (user selected or us-central1), v1
+      await fetchModels(discoveryLocation, 'v1');
 
-        const response = await requestUrl({
-          url: urlObj.toString(),
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
+      // Try 2: If no models found, try v1beta1
+      if (allModels.length === 0) {
+        await fetchModels(discoveryLocation, 'v1beta1');
+      }
 
-        if (response.status === 200) {
-          const data = response.json;
-          if (data.models) {
-            const fetched = data.models.map((m: any) => m.name.split('/').pop());
-            allModels = [...allModels, ...fetched];
-          }
-          nextPageToken = data.nextPageToken || null;
-        } else {
-          console.warn(`Mastermind: Unified listModels failed (${response.status})`, response.text);
-          break;
-        }
-      } while (nextPageToken);
-
-      // Now fetch from Google publisher (Foundational models)
-      nextPageToken = null;
-      do {
-        // Try the foundational models list.
-        // Note: Some models are under /locations/{location}/publishers/google/models
-        // and some under /locations/global/publishers/google/models
-        const pubUrl = `https://${location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`}/v1/publishers/google/models`;
-
-        const urlObj = new URL(pubUrl);
-        if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
-
-        const pubResponse = await requestUrl({
-          url: urlObj.toString(),
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (pubResponse.status === 200) {
-          const data = pubResponse.json;
-          if (data.models) {
-            const fetched = data.models.map((m: any) => m.name.split('/').pop());
-            allModels = [...allModels, ...fetched];
-          }
-          nextPageToken = data.nextPageToken || null;
-        } else {
-          console.warn(`Mastermind: Publisher listModels failed (${pubResponse.status})`, pubResponse.text);
-          break;
-        }
-      } while (nextPageToken);
+      // Try 3: If still no models, try us-central1 as universal discovery fallback
+      if (allModels.length === 0 && discoveryLocation !== 'us-central1') {
+        await fetchModels('us-central1', 'v1');
+      }
 
       if (allModels.length > 0) {
         return [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
       }
-      new Notice('Mastermind: Could not fetch models from API. Using fallback list.');
       return FALLBACK_MODELS;
     } catch (error: any) {
       console.error('Mastermind: Critical failure listing models', error);
-      new Notice(`Mastermind: Model listing error: ${error.message}`);
       return FALLBACK_MODELS;
     }
   }
+
 
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
