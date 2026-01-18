@@ -219,9 +219,9 @@ export class VertexService {
     };
 
     // 1. Fetch Publisher Models (Google / Gemini)
-    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/publishers/google/models
-    // This requires the scope of the project/location.
-    const publisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/publishers/google/models`;
+    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT}/locations/{LOCATION}/publishers/google/models
+    // Note: Use v1beta1 for ListPublisherModels as it is more reliable for new models and supported by documentation.
+    const publisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${discoveryLocation}/publishers/google/models`;
     const publisherModels = await safeFetch(publisherUrl, 'Publisher Models');
 
     publisherModels.forEach((m: any) => {
