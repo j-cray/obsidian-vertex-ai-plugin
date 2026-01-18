@@ -181,8 +181,7 @@ export class VertexService {
         const data = response.json;
         if (data.models) {
           const fetched = data.models
-            .map((m: any) => m.name.split('/').pop())
-            .filter((id: string) => id.includes('gemini'));
+            .map((m: any) => m.name.split('/').pop());
 
           if (fetched.length > 0) {
             // Merge fetched with important fallbacks (dedupe)

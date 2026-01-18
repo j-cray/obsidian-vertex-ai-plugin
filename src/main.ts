@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: MastermindSettings = {
 
 export default class MastermindPlugin extends Plugin {
   settings!: MastermindSettings;
+  private settingsCallbacks: (() => void)[] = [];
 
   async onload() {
     await this.loadSettings();
@@ -136,6 +137,15 @@ export default class MastermindPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.notifySettingsChanged();
+  }
+
+  onSettingsChange(callback: () => void) {
+    this.settingsCallbacks.push(callback);
+  }
+
+  notifySettingsChanged() {
+    this.settingsCallbacks.forEach(cb => cb());
   }
 }
 
@@ -149,12 +159,25 @@ class MastermindSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
-  display(): void {
+  async display(): Promise<void> {
     const { containerEl } = this;
 
     containerEl.empty();
-
     containerEl.createEl('h2', { text: 'Vertex AI Settings' });
+
+    // Auto-fetch models if credentials exist
+    if (this.plugin.settings.serviceAccountJson && this.plugin.settings.availableModels.length === 0) {
+      const vertex = new VertexService(this.plugin.settings);
+      try {
+        const models = await vertex.listModels();
+        if (models.length > 0) {
+          this.plugin.settings.availableModels = models;
+          // We don't save yet, just cache for this display session
+        }
+      } catch (e) {
+        console.error('Mastermind: Display auto-fetch failed', e);
+      }
+    }
 
     new Setting(containerEl)
       .setName('Service Account JSON')
@@ -162,9 +185,8 @@ class MastermindSettingTab extends PluginSettingTab {
       .addTextArea(text => text
         .setPlaceholder('{"type": "service_account", ...}')
         .setValue(this.plugin.settings.serviceAccountJson)
-        .onChange(async (value) => {
+        .onChange((value) => {
           this.plugin.settings.serviceAccountJson = value;
-          await this.plugin.saveSettings();
         }));
 
     const locations: Record<string, string[]> = {
@@ -183,47 +205,26 @@ class MastermindSettingTab extends PluginSettingTab {
           locs.forEach((loc: string) => dropdown.addOption(loc, `${region} - ${loc}`));
         }
         dropdown.setValue(this.plugin.settings.location)
-          .onChange(async (value) => {
+          .onChange((value) => {
             this.plugin.settings.location = value;
-            await this.plugin.saveSettings();
           });
       });
 
-    // Model Picker with Fetch
+    // Model Picker (Dropdown only, as requested)
     new Setting(containerEl)
       .setName('Gemini Model')
-      .setDesc('Enter a supported Model ID (e.g., gemini-1.5-pro, claude-3-opus) OR a numeric Vertex AI Endpoint ID for custom/Garden models.')
-      .addText(text => text
-        .setPlaceholder('gemini-2.0-flash-exp')
-        .setValue(this.plugin.settings.modelId)
-        .onChange(async (value) => {
-          this.plugin.settings.modelId = value;
-          await this.plugin.saveSettings();
-        }))
+      .setDesc('Select a supported Gemini model.')
       .addDropdown(dropdown => {
-        // Use cached models if available, else just current or default
         const options = this.plugin.settings.availableModels.length > 0
           ? this.plugin.settings.availableModels
           : [this.plugin.settings.modelId, 'gemini-1.5-pro', 'gemini-1.5-flash'];
 
-        // Deduplicate
         const uniqueOptions = [...new Set(options)];
-
-        // Add Fallback examples if empty/default
-        if (!this.plugin.settings.availableModels.length) {
-          uniqueOptions.push('claude-3-5-sonnet-v2@20241022', '1234567890 (Custom Endpoint)');
-        }
-
         uniqueOptions.forEach(m => dropdown.addOption(m, m));
 
         dropdown.setValue(this.plugin.settings.modelId);
-        dropdown.onChange(async (value) => {
+        dropdown.onChange((value) => {
           this.plugin.settings.modelId = value;
-          await this.plugin.saveSettings();
-          // Update text field to match
-          // @ts-ignore
-          const textComponent = containerEl.querySelector('input[type="text"]');
-          if (textComponent) textComponent.value = value;
         });
         this.modelDropdown = dropdown;
       })
@@ -233,11 +234,13 @@ class MastermindSettingTab extends PluginSettingTab {
         .onClick(async () => {
           const vertex = new VertexService(this.plugin.settings);
           try {
+            const btnEl = btn.extraSettingsEl;
+            btnEl.addClass('is-loading'); // Optional: would need CSS
             new Notice('Fetching models...');
+
             const models = await vertex.listModels();
             if (models.length > 0) {
               const dd = this.modelDropdown;
-              // Clear options
               // @ts-ignore
               dd.selectEl.innerHTML = '';
               models.forEach(m => dd.addOption(m, m));
@@ -245,39 +248,13 @@ class MastermindSettingTab extends PluginSettingTab {
 
               this.plugin.settings.modelId = models[0];
               this.plugin.settings.availableModels = models;
-              await this.plugin.saveSettings();
               new Notice(`Fetched ${models.length} models.`);
             } else {
-              new Notice('No Gemini models found. Using defaults.');
-              const defaults = ['gemini-3.0-pro', 'gemini-2.5-pro', 'gemini-1.5-pro'];
-              this.plugin.settings.availableModels = defaults;
-              this.plugin.settings.modelId = defaults[0]; // Force default selection
-              await this.plugin.saveSettings();
-
-              // @ts-ignore
-              const dd = this.modelDropdown;
-              // @ts-ignore
-              dd.selectEl.innerHTML = '';
-              // @ts-ignore
-              defaults.forEach(m => dd.addOption(m, m));
-              dd.setValue(defaults[0]);
+              new Notice('No additional models found.');
             }
           } catch (e) {
-            new Notice('Failed to fetch models. Using defaults.');
+            new Notice('Failed to fetch models.');
             console.error('Fetch error:', e);
-
-            const defaults = ['gemini-3.0-pro', 'gemini-2.5-pro', 'gemini-1.5-pro'];
-            this.plugin.settings.availableModels = defaults;
-            this.plugin.settings.modelId = defaults[0];
-            await this.plugin.saveSettings();
-
-            // @ts-ignore
-            const dd = this.modelDropdown;
-            // @ts-ignore
-            dd.selectEl.innerHTML = '';
-            // @ts-ignore
-            defaults.forEach(m => dd.addOption(m, m));
-            dd.setValue(defaults[0]);
           }
         }));
 
@@ -287,9 +264,8 @@ class MastermindSettingTab extends PluginSettingTab {
       .addText(text => text
         .setPlaceholder('https://...')
         .setValue(this.plugin.settings.profilePictureUser)
-        .onChange(async (value) => {
+        .onChange((value) => {
           this.plugin.settings.profilePictureUser = value;
-          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
@@ -298,30 +274,50 @@ class MastermindSettingTab extends PluginSettingTab {
       .addText(text => text
         .setPlaceholder('https://...')
         .setValue(this.plugin.settings.profilePictureAI)
-        .onChange(async (value) => {
+        .onChange((value) => {
           this.plugin.settings.profilePictureAI = value;
-          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
       .setName('Custom Context Prompt')
-      .setDesc('Additional instructions for the AI (e.g., "Be concise", "Answer in French").')
+      .setDesc('Additional instructions for the AI (e.g., "Be concise").')
       .addTextArea(text => text
         .setPlaceholder('You are an expert coder...')
         .setValue(this.plugin.settings.customContextPrompt)
-        .onChange(async (value) => {
+        .onChange((value) => {
           this.plugin.settings.customContextPrompt = value;
-          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
       .setName('Confirm Destructive Actions')
-      .setDesc('If enabled, Mastermind will ask before deleting files. Default is OFF (Maximum Power).')
+      .setDesc('If enabled, Mastermind will ask before deleting files.')
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.confirmDestructive)
-        .onChange(async (value) => {
+        .onChange((value) => {
           this.plugin.settings.confirmDestructive = value;
-          await this.plugin.saveSettings();
         }));
+
+    // --- SAVE BUTTON ---
+    containerEl.createEl('hr');
+    const navActions = containerEl.createDiv({ cls: 'mastermind-settings-actions' });
+    navActions.style.display = 'flex';
+    navActions.style.justifyContent = 'flex-end';
+    navActions.style.marginTop = '20px';
+
+    const saveBtn = navActions.createEl('button', {
+      cls: 'mod-cta',
+      text: 'Save Settings'
+    });
+
+    saveBtn.onclick = async () => {
+      try {
+        await this.plugin.saveSettings();
+        new Notice('Mastermind settings saved and synced.');
+      } catch (e) {
+        new Notice('Failed to save settings.');
+        console.error(e);
+      }
+    };
   }
+
 }

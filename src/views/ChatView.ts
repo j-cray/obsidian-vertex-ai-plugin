@@ -13,6 +13,7 @@ export class MastermindChatView extends ItemView {
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelPickerEl!: HTMLSelectElement;
+  modelLabel!: HTMLElement;
   messages: { role: string, parts: { text: string }[] }[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: MastermindPlugin) {
@@ -48,12 +49,19 @@ export class MastermindChatView extends ItemView {
 
     // Model Indicator (Static Label - Clicking opens Settings)
     const modelContainer = this.toolbarEl.createDiv('model-picker-container');
-    const modelLabel = modelContainer.createEl('span', { cls: 'model-indicator' });
-    modelLabel.innerText = this.plugin.settings.modelId || 'gemini-2.0-flash-exp';
-    modelLabel.title = "Current Model (Click to Settings)";
+    this.modelLabel = modelContainer.createEl('span', { cls: 'model-indicator' });
+    this.modelLabel.innerText = this.plugin.settings.modelId || 'gemini-2.0-flash-exp';
+    this.modelLabel.title = "Current Model (Click to Settings)";
+
+    // Update indicator when settings change
+    this.plugin.onSettingsChange(() => {
+      if (this.modelLabel) {
+        this.modelLabel.innerText = this.plugin.settings.modelId;
+      }
+    });
 
     // Clicking the model name opens settings directly
-    modelLabel.onclick = () => {
+    this.modelLabel.onclick = () => {
       // @ts-ignore
       this.app.setting.open();
       // @ts-ignore

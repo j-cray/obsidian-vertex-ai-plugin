@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -e
+if [[ ! -d "/home/icarus/obsidian-vertex-ai-plugin" ]]; then
+  echo "Cannot find source directory; Did you move it?"
+  echo "(Looking for "/home/icarus/obsidian-vertex-ai-plugin")"
+  echo 'Cannot force reload with this script - use "direnv reload" manually and then try again'
+  exit 1
+fi
+
+# rebuild the cache forcefully
+_nix_direnv_force_reload=1 direnv exec "/home/icarus/obsidian-vertex-ai-plugin" true
+
+# Update the mtime for .envrc.
+# This will cause direnv to reload again - but without re-building.
+touch "/home/icarus/obsidian-vertex-ai-plugin/.envrc"
+
+# Also update the timestamp of whatever profile_rc we have.
+# This makes sure that we know we are up to date.
+touch -r "/home/icarus/obsidian-vertex-ai-plugin/.envrc" "/home/icarus/obsidian-vertex-ai-plugin/.direnv"/*.rc
