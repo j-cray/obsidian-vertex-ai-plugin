@@ -173,12 +173,11 @@ export class VertexService {
     const accessToken = await this.getAccessToken();
     const projectId = this.getProjectId();
 
-    if (!projectId) {
-      new Notice('Mastermind: Error - Project ID is missing from Service Account JSON.');
-    }
-
     // For listing, we MUST use a regional location (global often 404s for listing)
     const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
+
+    // Explicitly notify user about the project ID being used
+    new Notice(`Mastermind: Discovering models for project: ${projectId} in ${discoveryLocation}`);
 
     const FALLBACK_MODELS = [
       'gemini-2.0-flash-exp',
@@ -258,10 +257,11 @@ export class VertexService {
       }
 
       if (allModels.length > 0) {
-        new Notice(`Mastermind: Found ${allModels.length} models.`);
-        return [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
+        const uniqueModels = [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
+        new Notice(`Mastermind: Found ${allModels.length} models. Total: ${uniqueModels.length}`);
+        return uniqueModels;
       }
-      new Notice(`Mastermind: API listing failed (Last status: ${status}). Using fallback list.`);
+      new Notice(`Mastermind: API listing returned 0 models (Last status: ${status}). Using fallback list.`);
       return FALLBACK_MODELS;
     } catch (error: any) {
       console.error('Mastermind: Critical failure listing models', error);
@@ -557,48 +557,59 @@ You can use tools to search, read, list, create, and delete notes/folders in the
         throw new Error('Received empty content from Vertex AI.');
       }
 
-      const part = candidate.content.parts[0];
+      // Handle MULTI-PART responses (Gemini 2.0 often sends text + function call)
+      const parts = candidate.content.parts;
+      const functionCalls = parts.filter((p: any) => p.functionCall);
+      const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join('\n');
 
-      if (part.functionCall) {
-        const { name, args } = part.functionCall;
-        let result: any;
-
-        try {
-          if (name === 'list_files') {
-            result = await vaultService.listMarkdownFiles();
-          } else if (name === 'read_file') {
-            result = await vaultService.getFileContent(args.path);
-          } else if (name === 'search_content') {
-            result = await vaultService.searchVault(args.query);
-          } else if (name === 'create_note') {
-            await vaultService.createNote(args.path, args.content);
-            result = { status: 'success', message: `Note created at ${args.path}` };
-          } else if (name === 'list_directory') {
-            result = await vaultService.listFolder(args.path);
-          } else if (name === 'move_file') {
-            await vaultService.moveFile(args.oldPath, args.newPath);
-            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-          } else if (name === 'delete_file') {
-            await vaultService.deleteFile(args.path);
-            result = { status: 'success', message: `File deleted at ${args.path}` };
-          }
-        } catch (err: any) {
-          result = { status: 'error', message: err.message };
-        }
-
+      if (functionCalls.length > 0) {
+        // Prepare to add model's part to context before function responses
         contents.push(candidate.content);
 
-        contents.push({
-          role: 'function',
-          parts: [{
-            functionResponse: {
-              name,
-              response: { name, content: result }
+        for (const part of functionCalls) {
+          const { name, args } = part.functionCall;
+          let result: any;
+
+          try {
+            console.log(`Mastermind: Executing tool ${name}`, args);
+            if (name === 'list_files') {
+              result = await vaultService.listMarkdownFiles();
+            } else if (name === 'read_file') {
+              result = await vaultService.getFileContent(args.path);
+            } else if (name === 'search_content') {
+              result = await vaultService.searchVault(args.query);
+            } else if (name === 'create_note') {
+              await vaultService.createNote(args.path, args.content);
+              result = { status: 'success', message: `Note created at ${args.path}` };
+            } else if (name === 'list_directory') {
+              result = await vaultService.listFolder(args.path);
+            } else if (name === 'move_file') {
+              await vaultService.moveFile(args.oldPath, args.newPath);
+              result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+            } else if (name === 'delete_file') {
+              await vaultService.deleteFile(args.path);
+              result = { status: 'success', message: `File deleted at ${args.path}` };
             }
-          }]
-        });
+          } catch (err: any) {
+            console.error(`Mastermind: Tool ${name} error`, err);
+            result = { status: 'error', message: err.message };
+          }
+
+          contents.push({
+            role: 'function',
+            parts: [{
+              functionResponse: {
+                name,
+                response: { content: result } // Cleaned up redundant name
+              }
+            }]
+          });
+        }
+        // After processing all function calls in this turn, loop to get next model turn
+        continue;
       } else {
-        return part.text;
+        // No function calls, return the text
+        return textParts || 'Empty response from model.';
       }
     }
 
