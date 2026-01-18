@@ -156,6 +156,11 @@ export class VertexService {
   async listModels(): Promise<string[]> {
     const accessToken = await this.getAccessToken();
     const projectId = this.getProjectId();
+
+    if (!projectId) {
+      new Notice('Mastermind: Error - Project ID is missing from Service Account JSON.');
+    }
+
     // For listing, we MUST use a regional location (global often 404s for listing)
     const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
 
@@ -172,80 +177,80 @@ export class VertexService {
 
     let allModels: string[] = [];
 
-    const fetchModels = async (location: string, version: string = 'v1'): Promise<void> => {
+    const fetchModels = async (location: string, version: string = 'v1'): Promise<number> => {
       const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
-      const baseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
+      const projectBaseUrl = `https://${host}/${version}/projects/${projectId}/locations/${location}`;
+      const globalPubUrl = `https://${host}/${version}/publishers/google/models`;
+
+      let lastStatus = 0;
+
+      const tryUrl = async (url: string, logLabel: string): Promise<boolean> => {
+        try {
+          const urlObj = new URL(url);
+          if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+
+          const response = await requestUrl({
+            url: urlObj.toString(),
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          lastStatus = response.status;
+          if (response.status === 200) {
+            const data = response.json;
+            if (data.models && data.models.length > 0) {
+              const fetched = data.models.map((m: any) => m.name.split('/').pop());
+              allModels = [...allModels, ...fetched];
+              nextPageToken = data.nextPageToken || null;
+              return true;
+            }
+          } else {
+            console.log(`Mastermind: ${logLabel} failed: ${response.status} for ${url}`);
+          }
+        } catch (e: any) {
+          console.log(`Mastermind: ${logLabel} exception: ${e.message} for ${url}`);
+        }
+        return false;
+      };
 
       let nextPageToken: string | null = null;
-      try {
-        do {
-          const urlObj = new URL(`${baseUrl}/models`);
-          if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
+      // Try project models
+      await tryUrl(`${projectBaseUrl}/models`, 'ProjectModels');
 
-          const response = await requestUrl({
-            url: urlObj.toString(),
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
+      // Try project publishers
+      nextPageToken = null;
+      await tryUrl(`${projectBaseUrl}/publishers/google/models`, 'ProjectPublishers');
 
-          if (response.status === 200 && response.json.models) {
-            const fetched = response.json.models.map((m: any) => m.name.split('/').pop());
-            allModels = [...allModels, ...fetched];
-            nextPageToken = response.json.nextPageToken || null;
-          } else {
-            console.warn(`Mastermind: listModels Try (${location}/${version}) failed: ${response.status}`);
-            break;
-          }
-        } while (nextPageToken);
+      // Try global publishers (Discovery API)
+      nextPageToken = null;
+      await tryUrl(globalPubUrl, 'GlobalPublishers');
 
-        nextPageToken = null;
-        do {
-          const urlObj = new URL(`${baseUrl}/publishers/google/models`);
-          if (nextPageToken) urlObj.searchParams.append('pageToken', nextPageToken);
-
-          const response = await requestUrl({
-            url: urlObj.toString(),
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (response.status === 200 && response.json.models) {
-            const fetched = response.json.models.map((m: any) => m.name.split('/').pop());
-            allModels = [...allModels, ...fetched];
-            nextPageToken = response.json.nextPageToken || null;
-          } else {
-            console.warn(`Mastermind: Publisher listModels Try (${location}/${version}) failed: ${response.status}`);
-            break;
-          }
-        } while (nextPageToken);
-      } catch (e: any) {
-        console.warn(`Mastermind: listModels exception (${location}/${version}): ${e.message}`);
-      }
+      return lastStatus;
     };
 
     try {
+      new Notice(`Mastermind: Listing models for project: ${projectId}`);
       // Try 1: Discovery location (user selected or us-central1), v1
-      await fetchModels(discoveryLocation, 'v1');
+      let status = await fetchModels(discoveryLocation, 'v1');
 
       // Try 2: If no models found, try v1beta1
       if (allModels.length === 0) {
-        await fetchModels(discoveryLocation, 'v1beta1');
+        status = await fetchModels(discoveryLocation, 'v1beta1');
       }
 
       // Try 3: If still no models, try us-central1 as universal discovery fallback
       if (allModels.length === 0 && discoveryLocation !== 'us-central1') {
-        await fetchModels('us-central1', 'v1');
+        status = await fetchModels('us-central1', 'v1');
       }
 
       if (allModels.length > 0) {
+        new Notice(`Mastermind: Found ${allModels.length} models.`);
         return [...new Set([...allModels, ...FALLBACK_MODELS])].sort();
       }
+      new Notice(`Mastermind: API listing failed (Last status: ${status}). Using fallback list.`);
       return FALLBACK_MODELS;
     } catch (error: any) {
       console.error('Mastermind: Critical failure listing models', error);
