@@ -318,8 +318,8 @@ export class VertexService {
   }
 
   private async *chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string, initialText: string = '', initialThinking: string = '', recursionDepth: number = 0, signal?: AbortSignal): AsyncGenerator<ChatResponse> {
-    if (recursionDepth > 10) {
-      yield { text: "\n\n**Error:** Max recursion limit reached. The model is looping.", actions: [] };
+    if (recursionDepth > 30) {
+      yield { text: "\n\n**Error:** Max recursion limit reached (30 steps). The model is looping or the task is too complex.", actions: [] };
       return;
     }
 
