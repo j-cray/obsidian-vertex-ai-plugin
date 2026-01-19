@@ -199,8 +199,8 @@ class MastermindSettingTab extends PluginSettingTab {
         .addOption('vertex', 'Vertex AI (GCP)')
         .addOption('aistudio', 'AI Studio (API Key)')
         .setValue(this.plugin.settings.authProvider)
-        .onChange(async (value: 'vertex' | 'aistudio') => {
-          this.plugin.settings.authProvider = value;
+        .onChange(async (value: string) => {
+          this.plugin.settings.authProvider = value as 'vertex' | 'aistudio';
           await this.plugin.saveSettings();
           this.display(); // Refresh to show/hide relevant fields
         }));

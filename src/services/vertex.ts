@@ -309,29 +309,47 @@ export class VertexService {
 
   async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): AsyncGenerator<ChatResponse> {
     console.log('Mastermind: Service - chat called');
-    const accessToken = await this.getAccessToken();
-    console.log('Mastermind: Service - token retrieved');
-    const projectId = JSON.parse(this.serviceAccountJson).project_id;
-    const location = this.location || 'us-central1';
+
+    let accessToken = '';
+    let projectId = '';
+    let location = this.location || 'us-central1';
+
+    // DUAL AUTH: Handle differently based on provider
+    if (this.authProvider === 'aistudio') {
+      // AI Studio doesn't need GCP credentials
+      if (!this.aiStudioKey) {
+        yield { text: '**Error:** AI Studio API key not configured. Please add your key in settings.', actions: [] };
+        return;
+      }
+      accessToken = ''; // Not used for AI Studio
+      projectId = ''; // Not used for AI Studio
+    } else {
+      // Vertex AI needs GCP credentials
+      accessToken = await this.getAccessToken();
+      console.log('Mastermind: Service - token retrieved');
+      try {
+        projectId = JSON.parse(this.serviceAccountJson).project_id;
+      } catch (e) {
+        yield { text: '**Error:** Invalid Service Account JSON. Please check your configuration.', actions: [] };
+        return;
+      }
+    }
 
     try {
       yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location, '', '', 0, signal);
     } catch (error: any) {
       if (signal?.aborted) return; // Silent exit on abort
 
-      // Automatic Fallback to us-central1 for 404/400 or certain model errors
+      // Automatic Fallback for model errors
       const isConfigError = error.message.includes('404') || error.message.includes('not found') || error.message.includes('400');
 
-      if (location !== 'us-central1' && isConfigError) {
-        console.log(`Mastermind: Chat failed in ${location} (Error: ${error.message}). Falling back to us-central1 + Safe Model...`);
-        // Override model to a known good one for fallback
-        this.modelId = 'gemini-2.0-flash-exp';
-        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1', '', '', 0, signal);
-      } else if (error.message.includes('400') && this.modelId !== 'gemini-2.0-flash-exp') {
-        // Fallback for bad model name even if in us-central1
-        console.log('Mastermind: 400 Bad Request. Retrying with gemini-2.0-flash-exp...');
+      if (isConfigError && this.modelId !== 'gemini-2.0-flash-exp') {
+        console.log(`Mastermind: Chat failed (Error: ${error.message}). Falling back to gemini-2.0-flash-exp...`);
         this.modelId = 'gemini-2.0-flash-exp';
         yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location, '', '', 0, signal);
+      } else if (this.authProvider === 'vertex' && location !== 'us-central1' && isConfigError) {
+        console.log(`Mastermind: Falling back to us-central1...`);
+        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1', '', '', 0, signal);
       } else {
         throw error;
       }
