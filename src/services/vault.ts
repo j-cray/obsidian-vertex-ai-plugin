@@ -301,4 +301,22 @@ export class VaultService {
     }
     return bytes.buffer;
   }
+  async enhanceTextWithLinks(text: string): Promise<string> {
+    const fileNames = await this.getAllFileNames();
+    const sortedNames = Array.from(fileNames).sort((a, b) => b.length - a.length);
+
+    let processedText = text;
+
+    for (const name of sortedNames) {
+      if (name.length < 3) continue;
+      // Regex: negative lookbehind for [[, word boundary, name, word boundary, negative lookahead for ]]
+      const regex = new RegExp(`(?<!\\[\\[)\\b(${this.escapeRegExp(name)})\\b(?!\\]\\])`, 'g');
+      processedText = processedText.replace(regex, '[[$1]]');
+    }
+    return processedText;
+  }
+
+  private escapeRegExp(string: string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
 }

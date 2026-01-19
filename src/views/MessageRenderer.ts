@@ -1,0 +1,90 @@
+import { App, MarkdownRenderer, Component, setIcon } from 'obsidian';
+import { ToolAction } from '../types';
+
+export class MessageRenderer {
+  app: App;
+  container: HTMLElement;
+
+  constructor(app: App, container: HTMLElement) {
+    this.app = app;
+    this.container = container;
+  }
+
+  renderTo(container: HTMLElement) {
+    this.container = container; // Allow rebinding
+  }
+
+  async renderUserMessage(text: string, avatarUrl: string) {
+    const msgBlock = this.container.createDiv('chat-message-block message-block-user');
+    const avatar = msgBlock.createEl('img', { cls: 'chat-avatar', attr: { src: avatarUrl } });
+    const msgEl = msgBlock.createDiv('chat-message message-user');
+    msgEl.innerText = text;
+    this.scrollBottom();
+    return msgEl;
+  }
+
+  async renderAIMessage(text: string, avatarUrl: string, actions: ToolAction[] = []) {
+    const msgBlock = this.container.createDiv('chat-message-block message-block-ai');
+    const avatar = msgBlock.createEl('img', { cls: 'chat-avatar', attr: { src: avatarUrl } });
+    const contentContainer = msgBlock.createDiv('chat-message-content message-ai');
+
+    // Render Actions First
+    if (actions && actions.length > 0) {
+      await this.renderToolActions(contentContainer, actions);
+    }
+
+    // Render Text
+    if (text) {
+      const msgEl = contentContainer.createDiv('chat-text-content');
+      const component = new Component();
+      component.load();
+      await MarkdownRenderer.render(this.app, text, msgEl, '', component);
+    }
+
+    this.scrollBottom();
+    return contentContainer;
+  }
+
+  async renderToolActions(container: HTMLElement, actions: ToolAction[]) {
+    const actionContainer = container.createDiv('chat-tool-actions');
+
+    for (const action of actions) {
+      const toolCard = actionContainer.createDiv('tool-action-card');
+      if (action.status === 'error') toolCard.addClass('tool-error');
+
+      // Header
+      const header = toolCard.createDiv('tool-header');
+      const iconSpan = header.createSpan('tool-icon');
+      setIcon(iconSpan, 'wrench'); // Default icon
+
+      const title = header.createSpan('tool-name');
+      title.innerText = `Used ${action.tool}`;
+
+      // Details (Collapsible? For now just simple line)
+      const details = toolCard.createDiv('tool-details');
+      if (action.tool === 'generate_image') {
+        // Special handling for image generation display?
+        // The image link comes in the 'result' usually or formatted text.
+        // Just show input prompt here.
+        details.innerText = `Prompt: "${action.input.prompt}"`;
+      } else if (action.tool === 'create_note' || action.tool === 'read_file') {
+        details.innerText = action.input.path;
+      } else if (action.tool === 'search_content') {
+        details.innerText = `"${action.input.query}"`;
+      } else {
+        details.innerText = JSON.stringify(action.input);
+      }
+    }
+  }
+
+  renderThinking(container: HTMLElement) {
+    const thinkingContainer = container.createDiv('thinking-container');
+    thinkingContainer.innerHTML = '<div class="thinking-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div>';
+    this.scrollBottom();
+    return thinkingContainer;
+  }
+
+  private scrollBottom() {
+    this.container.scrollTop = this.container.scrollHeight;
+  }
+}

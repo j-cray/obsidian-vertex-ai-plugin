@@ -1,4 +1,5 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
+import { ChatResponse, ToolAction } from '../types';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -277,7 +278,7 @@ export class VertexService {
 
 
 
-  async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
+  async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<ChatResponse> {
     const accessToken = await this.getAccessToken();
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
@@ -294,7 +295,7 @@ export class VertexService {
     }
   }
 
-  private async chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string): Promise<string> {
+  private async chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string): Promise<ChatResponse> {
 
     // Model Selection
     const modelId = this.modelId || 'gemini-2.0-flash-exp';
@@ -310,18 +311,10 @@ export class VertexService {
       const host = effectiveLocation === 'global' ? 'aiplatform.googleapis.com' : `${effectiveLocation}-aiplatform.googleapis.com`;
       const url = `https://${host}/v1/${endpointResource}:predict`;
 
-      // Standard MaaS Payload (Mistral/Llama usually accept: { instances: [{ prompt: "..." }], parameters: {...} })
-      // or OpenAI-compatible format if deployed with vLLM (check documentation).
-      // Let's implement the standard Vertex AI "Raw Prediction" or "Predict" format for text generation.
-      // Most Model Garden text models expect: { instances: [ { prompt: ... } ], parameters: { maxOutputTokens: ... } }
-
       const body = {
         instances: [
           {
             prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:`,
-            // Some models treat "messages" list differently.
-            // For broad compatibility with raw endpoints, we construct a single prompt string.
-            // Ideally, we'd detect the model type, but for "generic endpoint" support, text completion is safest default.
           }
         ],
         parameters: {
@@ -346,25 +339,20 @@ export class VertexService {
       }
 
       const data = response.json;
-      // Standard Vertex Predict Response: { predictions: [ "text" ] } or { predictions: [ { content: "text" } ] }
       const pred = data.predictions[0];
-      if (typeof pred === 'string') return pred;
-      if (pred.content) return pred.content;
-      return JSON.stringify(pred); // Fallback
+      const text = (typeof pred === 'string') ? pred : (pred.content || JSON.stringify(pred));
+
+      return { text, actions: [] };
     }
 
     // 2. ANTHROPIC CLAUDE (via Vertex AI)
     if (isClaude) {
-      // Claude typically uses `streamRawPredict` or `rawPredict` on a specific endpoint
-      // e.g. https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022:streamRawPredict
       const url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
 
-      // Construct Claude-specific payload
       const messages = history.map(h => ({
         role: h.role === 'model' ? 'assistant' : 'user',
-        content: h.parts[0].text // Simplify: previous parts usually just text
+        content: h.parts[0].text
       }));
-      // Add current prompt
       messages.push({ role: "user", content: `Context:\n${context}\n\nQuestion: ${prompt}` });
 
       const body = {
@@ -389,17 +377,12 @@ export class VertexService {
         throw new Error(`Claude API Error ${response.status}: ${response.text}`);
       }
 
-      // Parse Claude Response (streamRawPredict returns NDJSON-like lines if streamed, but we falsed it?
-      // Actually streamRawPredict might return a stream. Let's try `rawPredict` if available, or just parse carefully.)
-      // Vertex Claude often returns a JSON list if not streaming.
-      // Let's assume standard response for now. If it fails, we fall back.
       const data = response.json;
-      // Adjust based on actual shape (often data.content[0].text)
-      return data.content ? data.content[0].text : JSON.stringify(data);
+      const text = data.content ? data.content[0].text : JSON.stringify(data);
+      return { text, actions: [] };
     }
 
     // 2. GOOGLE GEMINI (Default)
-    // Use v1beta1 for preview/experimental models (like Gemini 3.0), v1 for stable.
     const isGemini3 = modelId.includes('gemini-3');
     const isImagen = modelId.includes('imagen');
     const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
@@ -414,7 +397,6 @@ export class VertexService {
         ],
         parameters: {
           sampleCount: 1,
-          // aspectRatio: '1:1' // Optional, could be configurable
         }
       };
 
@@ -435,11 +417,10 @@ export class VertexService {
       }
 
       const data = response.json;
-      // Imagen response: { predictions: [ { bytesBase64Encoded: "..." } ] }
       if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
         const base64 = data.predictions[0].bytesBase64Encoded;
         const link = await vaultService.saveImage(base64);
-        return `Here is your generated image:\n\n${link}`;
+        return { text: `Here is your generated image:\n\n${link}`, actions: [] };
       }
 
       throw new Error('No image data returned from Imagen.');
@@ -582,7 +563,7 @@ Then provide your final answer.`;
 
     contents.push({ role: 'user', parts });
 
-    let executedActions: string[] = [];
+    let allExecutedActions: ToolAction[] = [];
 
     for (let i = 0; i < 15; i++) {
       const body = {
@@ -616,7 +597,6 @@ Then provide your final answer.`;
 
       const data = response.json;
       if (!data.candidates || data.candidates.length === 0) {
-        // Check if blocked
         if (data.promptFeedback?.blockReason) {
           throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
         }
@@ -633,60 +613,57 @@ Then provide your final answer.`;
         throw new Error('Received empty content from Vertex AI.');
       }
 
-      // Handle MULTI-PART responses (Gemini 2.0 often sends text + function call)
       const parts = candidate.content.parts;
       const functionCalls = parts.filter((p: any) => p.functionCall);
       const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join('\n');
 
       if (functionCalls.length > 0) {
-        // Record the model's turn (containing functionCalls)
         contents.push(candidate.content);
-
         const functionResponseParts: any[] = [];
 
         for (const part of functionCalls) {
           const { name, args } = part.functionCall;
           let result: any;
+          let status: 'success' | 'error' = 'success';
 
           try {
             console.log(`Mastermind: Executing tool ${name}`, args);
-            // Agentic: Handlers
+
             if (name === 'generate_image') {
               new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
               console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
               const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
               result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
-              executedActions.push(`Generated image with **Imagen 3**: "${args.prompt}"`);
             } else if (name === 'list_files') {
               result = await vaultService.listMarkdownFiles();
-              executedActions.push(`Listed vault files.`);
             } else if (name === 'read_file') {
               result = await vaultService.getFileContent(args.path);
-              executedActions.push(`Read file: \`${args.path}\``);
             } else if (name === 'search_content') {
               result = await vaultService.searchVault(args.query);
-              executedActions.push(`Searched vault for: "${args.query}"`);
             } else if (name === 'create_note') {
               await vaultService.createNote(args.path, args.content);
               result = { status: 'success', message: `Note created at ${args.path}` };
-              executedActions.push(`Created note: \`${args.path}\``);
             } else if (name === 'list_directory') {
               result = await vaultService.listFolder(args.path);
-              executedActions.push(`Listed directory: \`${args.path}\``);
             } else if (name === 'move_file') {
               await vaultService.moveFile(args.oldPath, args.newPath);
               result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-              executedActions.push(`Moved file \`${args.oldPath}\` to \`${args.newPath}\``);
             } else if (name === 'delete_file') {
               await vaultService.deleteFile(args.path);
               result = { status: 'success', message: `File deleted at ${args.path}` };
-              executedActions.push(`Deleted file: \`${args.path}\``);
             }
           } catch (err: any) {
             console.error(`Mastermind: Tool ${name} error`, err);
             result = { status: 'error', message: err.message };
-            executedActions.push(`Failed to execute ${name}: ${err.message}`);
+            status = 'error';
           }
+
+          allExecutedActions.push({
+            tool: name,
+            input: args,
+            output: result,
+            status: status
+          });
 
           functionResponseParts.push({
             functionResponse: {
@@ -696,22 +673,17 @@ Then provide your final answer.`;
           });
         }
 
-        // IMPORTANT: Vertex AI REST API requires the role for functionResponse messages to be 'user'
         contents.push({
           role: 'user',
           parts: functionResponseParts
         });
 
-        // After processing all function calls in this turn, loop to get next model turn
         continue;
       } else {
-        // No function calls, return the text
-        // Prepend executed actions if any
-        if (executedActions.length > 0) {
-          const actionsBlock = executedActions.map(a => `> [!NOTE] Action\n> ${a}`).join('\n\n');
-          return `${actionsBlock}\n\n${textParts || ''}`;
-        }
-        return textParts || 'Empty response from model.';
+        return {
+          text: textParts || 'Empty response from model.',
+          actions: allExecutedActions
+        };
       }
     }
 

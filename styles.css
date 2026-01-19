@@ -347,3 +347,50 @@
     color: var(--accent-color);
     opacity: 0.8;
 }
+
+/* Tool Action Cards */
+.chat-tool-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.tool-action-card {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-action-card.tool-error {
+  border-color: var(--text-error);
+  background-color: rgba(var(--color-red-rgb), 0.1);
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.tool-icon {
+  display: flex;
+  align-items: center;
+}
+
+.tool-details {
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
