@@ -782,59 +782,94 @@ Then provide your final answer.`;
             new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
             const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
             result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully.' };
-          } else if (name === 'list_files') {
-            result = await vaultService.listMarkdownFiles();
-          } else if (name === 'read_file') {
-            result = await vaultService.getFileContent(args.path);
-          } else if (name === 'search_content') {
-            result = await vaultService.searchVault(args.query);
-          } else if (name === 'create_note') {
-            await vaultService.createNote(args.path, args.content);
-            result = { status: 'success', message: `Note created at ${args.path}` };
-          } else if (name === 'create_folder') {
-            await vaultService.createFolder(args.path);
-            result = { status: 'success', message: `Folder created at ${args.path}` };
-          } else if (name === 'list_directory') {
-            result = await vaultService.listFolder(args.path);
-          } else if (name === 'move_file') {
-            await vaultService.moveFile(args.oldPath, args.newPath);
-            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-          } else if (name === 'delete_file') {
-            await vaultService.deleteFile(args.path);
-            result = { status: 'success', message: `File deleted at ${args.path}` };
-          } else if (name === 'append_to_note') {
-            await vaultService.appendToNote(args.path, args.content);
-            result = { status: 'success', message: `Appended content to ${args.path}` };
-          } else if (name === 'prepend_to_note') {
-            await vaultService.prependToNote(args.path, args.content);
-            result = { status: 'success', message: `Prepended content to ${args.path}` };
-          } else if (name === 'update_section') {
-            await vaultService.updateNoteSection(args.path, args.header, args.content);
-            result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
-          } else if (name === 'get_tags') {
-            const tags = await vaultService.getTags();
-            result = { status: 'success', tags: tags };
-          } else if (name === 'get_links') {
-            const links = await vaultService.getLinks(args.path);
-            result = { status: 'success', links: links };
-          } else if (name === 'run_terminal_command') {
-            // @ts-ignore
-            if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmDestructive) {
-              throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled.");
+          } else if (name === 'list_files' || name === 'read_file' || name === 'search_content' || name === 'list_directory' || name === 'get_tags' || name === 'get_links') {
+            // READ OPERATIONS
+            if (!this.permVaultRead) {
+              result = { status: 'error', message: 'Permission denied: Vault read access is disabled in settings.' };
+            } else {
+              if (name === 'list_files') {
+                result = await vaultService.listMarkdownFiles();
+              } else if (name === 'read_file') {
+                result = await vaultService.getFileContent(args.path);
+              } else if (name === 'search_content') {
+                result = await vaultService.searchVault(args.query);
+              } else if (name === 'list_directory') {
+                result = await vaultService.listFolder(args.path);
+              } else if (name === 'get_tags') {
+                const tags = await vaultService.getTags();
+                result = { status: 'success', tags: tags };
+              } else if (name === 'get_links') {
+                const links = await vaultService.getLinks(args.path);
+                result = { status: 'success', links: links };
+              }
             }
-            try {
-              const { stdout, stderr } = await execAsync(args.command);
-              result = { status: 'success', stdout: stdout, stderr: stderr };
-            } catch (e: any) {
-              result = { status: 'error', message: e.message, stderr: e.stderr };
+          } else if (name === 'create_note' || name === 'create_folder' || name === 'move_file' || name === 'append_to_note' || name === 'prepend_to_note' || name === 'update_section') {
+            // WRITE OPERATIONS
+            if (!this.permVaultWrite) {
+              result = { status: 'error', message: 'Permission denied: Vault write access is disabled in settings.' };
+            } else {
+              if (name === 'create_note') {
+                await vaultService.createNote(args.path, args.content);
+                result = { status: 'success', message: `Note created at ${args.path}` };
+              } else if (name === 'create_folder') {
+                await vaultService.createFolder(args.path);
+                result = { status: 'success', message: `Folder created at ${args.path}` };
+              } else if (name === 'move_file') {
+                await vaultService.moveFile(args.oldPath, args.newPath);
+                result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+              } else if (name === 'append_to_note') {
+                await vaultService.appendToNote(args.path, args.content);
+                result = { status: 'success', message: `Appended content to ${args.path}` };
+              } else if (name === 'prepend_to_note') {
+                await vaultService.prependToNote(args.path, args.content);
+                result = { status: 'success', message: `Prepended content to ${args.path}` };
+              } else if (name === 'update_section') {
+                await vaultService.updateNoteSection(args.path, args.header, args.content);
+                result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
+              }
+            }
+          } else if (name === 'delete_file') {
+            // DELETE OPERATIONS
+            if (!this.permVaultDelete) {
+              result = { status: 'error', message: 'Permission denied: Vault delete access is disabled in settings.' };
+            } else {
+              // @ts-ignore
+              if (this.confirmVaultDestructive && vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmVaultDestructive) {
+                result = { status: 'error', message: 'Vault deletions require confirmation. Please enable this manually or disable confirmation in settings.' };
+              } else {
+                await vaultService.deleteFile(args.path);
+                result = { status: 'success', message: `File deleted at ${args.path}` };
+              }
+            }
+          } else if (name === 'run_terminal_command') {
+            // TERMINAL OPERATIONS
+            if (!this.permTerminal) {
+              result = { status: 'error', message: 'Permission denied: Terminal access is disabled in settings.' };
+            } else {
+              // @ts-ignore
+              if (this.confirmTerminalDestructive && vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmTerminalDestructive) {
+                result = { status: 'error', message: 'Terminal commands require confirmation. Disable confirmation in settings.' };
+              } else {
+                try {
+                  const { stdout, stderr } = await execAsync(args.command);
+                  result = { status: 'success', stdout: stdout, stderr: stderr };
+                } catch (e: any) {
+                  result = { status: 'error', message: e.message, stderr: e.stderr };
+                }
+              }
             }
           } else if (name === 'fetch_url') {
-            try {
-              const response = await requestUrl({ url: args.url });
-              const text = response.text.substring(0, 10000);
-              result = { status: 'success', content_snippet: text, full_length: response.text.length };
-            } catch (e: any) {
-              result = { status: 'error', message: e.message };
+            // WEB OPERATIONS
+            if (!this.permWeb) {
+              result = { status: 'error', message: 'Permission denied: Web access is disabled in settings.' };
+            } else {
+              try {
+                const response = await requestUrl({ url: args.url });
+                const text = response.text.substring(0, 10000);
+                result = { status: 'success', content_snippet: text, full_length: response.text.length };
+              } catch (e: any) {
+                result = { status: 'error', message: e.message };
+              }
             }
           } else {
             result = { status: 'error', message: `Unknown tool: ${name}` };
