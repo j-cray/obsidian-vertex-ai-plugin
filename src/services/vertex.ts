@@ -283,7 +283,9 @@ export class VertexService {
 
 
   async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): AsyncGenerator<ChatResponse> {
+    console.log('Mastermind: Service - chat called');
     const accessToken = await this.getAccessToken();
+    console.log('Mastermind: Service - token retrieved');
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
 

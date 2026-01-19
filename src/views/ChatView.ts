@@ -206,8 +206,11 @@ export class MastermindChatView extends ItemView {
     try {
       this.vertexService.updateSettings(this.plugin.settings);
 
+      console.log('Mastermind: View - getting context');
       const context = await this.vaultService.getRelevantContext(message);
+      console.log('Mastermind: View - context retrieved');
       const images = await this.vaultService.getActiveNoteImages();
+      console.log('Mastermind: View - starting chat stream');
 
       // Streaming Loop
       let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
