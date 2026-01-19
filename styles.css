@@ -171,6 +171,13 @@
     overflow-x: auto;
 }
 
+/* Fix flex child overflow */
+.message-ai,
+.message-user {
+    min-width: 0;
+    /* Allows text wrap inside flex item */
+}
+
 /* User Message - Premium Gradient */
 .message-user {
     background: var(--user-msg-bg);

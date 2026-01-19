@@ -106,15 +106,24 @@ export class MessageRenderer {
         }
       }
 
-      // 3. Text (Debounced Markdown)
+      // 3. Text (Debounced Markdown for "Typewriter" feel)
       if (response.text && response.text !== currentText) {
         const now = Date.now();
-        // Render if final OR > 100ms since last render
-        if (isFinal || (now - lastRenderTime > 100)) {
-          textContainer.empty();
+        // Render if final OR > 50ms since last render (Smoother typewriter)
+        if (isFinal || (now - lastRenderTime > 50)) {
+          // Create a temp element for the Markdown render
+          const tempContainer = createDiv();
           const component = new Component();
           component.load();
-          await MarkdownRenderer.render(this.app, response.text, textContainer, '', component);
+          await MarkdownRenderer.render(this.app, response.text, tempContainer, '', component);
+
+          // Replace content
+          textContainer.empty();
+          // Move children to avoid full innerHTML thrashing if possible, but empty+append is safer for hydration
+          while (tempContainer.firstChild) {
+            textContainer.appendChild(tempContainer.firstChild);
+          }
+
           lastRenderTime = now;
           currentText = response.text;
         }
