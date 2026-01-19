@@ -683,11 +683,14 @@ Then provide your final answer.`;
 
                     while (remaining.length > 0) {
                       if (!isThinking) {
-                        const startIdx = remaining.indexOf('```thinking');
-                        if (startIdx !== -1) {
+                        // Case insensitive match for start of thinking block
+                        const match = remaining.match(/```thinking/i);
+                        if (match && match.index !== undefined) {
+                          const startIdx = match.index;
                           accumulatedText += remaining.substring(0, startIdx);
-                          remaining = remaining.substring(startIdx + 11);
+                          remaining = remaining.substring(startIdx + match[0].length);
                           isThinking = true;
+                          console.log('Mastermind: Thinking block STARTED');
                         } else {
                           accumulatedText += remaining;
                           remaining = '';
@@ -695,11 +698,14 @@ Then provide your final answer.`;
                       } else {
                         const endIdx = remaining.indexOf('```');
                         if (endIdx !== -1) {
-                          accumulatedThinking += remaining.substring(0, endIdx);
+                          const thoughtChunk = remaining.substring(0, endIdx);
+                          accumulatedThinking += thoughtChunk;
                           remaining = remaining.substring(endIdx + 3);
                           isThinking = false;
+                          console.log('Mastermind: Thinking block ENDED. Content length:', thoughtChunk.length);
                         } else {
                           accumulatedThinking += remaining;
+                          // console.log('Mastermind: Thinking chunk:', remaining.length);
                           remaining = '';
                         }
                       }
