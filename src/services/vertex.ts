@@ -9,21 +9,25 @@ export class VertexService {
   private serviceAccountJson!: string;
   private location!: string;
   private modelId!: string;
+  private maxOutputTokens: number = 8192;
+  private temperature: number = 0.7;
   private customContextPrompt: string = '';
   private accessToken: string | null = null;
   private tokenExpiry: number = 0;
   private isRefreshingToken: boolean = false;
   private tokenRefreshPromise: Promise<string> | null = null;
 
-  constructor(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
+  constructor(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string, maxOutputTokens: number, temperature: number }) {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
+  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string, maxOutputTokens: number, temperature: number }) {
     this.serviceAccountJson = settings.serviceAccountJson;
     this.location = settings.location;
     this.modelId = settings.modelId;
     this.customContextPrompt = settings.customContextPrompt;
+    this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
+    this.temperature = settings.temperature ?? 0.7;
     this.accessToken = null; // Reset token on settings change
   }
 
@@ -348,7 +352,7 @@ export class VertexService {
 
         body = {
           instances: [{ prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:` }],
-          parameters: { temperature: 0.7, maxOutputTokens: 2048, topP: 0.95 }
+          parameters: { temperature: this.temperature, maxOutputTokens: this.maxOutputTokens, topP: 0.95 }
         };
       } else if (isClaude) {
         url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
@@ -361,7 +365,8 @@ export class VertexService {
           anthropic_version: "vertex-2023-10-16",
           messages: messages,
           system: `You are Mastermind. ${this.customContextPrompt || ''} Be concise.`,
-          max_tokens: 4096,
+          max_tokens: this.maxOutputTokens,
+          temperature: this.temperature,
           stream: false
         };
       } else { // Imagen
@@ -615,7 +620,7 @@ Then provide your final answer.`;
       contents,
       system_instruction: { parts: [{ text: systemInstructionText }] },
       tools,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+      generationConfig: { temperature: this.temperature, maxOutputTokens: this.maxOutputTokens },
       safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },

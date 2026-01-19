@@ -14,19 +14,24 @@ interface MastermindSettings {
   confirmDestructive: boolean;
   defaultModel: string;
   availableModels: string[]; // Cache fetched models
+  // Generation Params
+  maxOutputTokens: number;
+  temperature: number;
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
   serviceAccountJson: '',
   location: 'us-central1',
-  modelId: 'gemini-1.5-pro-preview-0409',
+  modelId: 'gemini-2.0-flash-exp',
   history: [],
-  profilePictureUser: 'https://api.dicebear.com/7.x/notionists/svg?seed=User', // Default avatars
+  profilePictureUser: 'https://api.dicebear.com/7.x/notionists/svg?seed=User',
   profilePictureAI: 'https://api.dicebear.com/7.x/bottts/svg?seed=Mastermind',
   customContextPrompt: '',
   confirmDestructive: false,
-  defaultModel: 'gemini-2.0-flash-exp', // Safe, widely available default
-  availableModels: []
+  defaultModel: 'gemini-2.0-flash-exp',
+  availableModels: [],
+  maxOutputTokens: 8192,
+  temperature: 0.7
 }
 
 export default class MastermindPlugin extends Plugin {
@@ -185,8 +190,9 @@ class MastermindSettingTab extends PluginSettingTab {
       .addTextArea(text => text
         .setPlaceholder('{"type": "service_account", ...}')
         .setValue(this.plugin.settings.serviceAccountJson)
-        .onChange((value) => {
+        .onChange(async (value) => {
           this.plugin.settings.serviceAccountJson = value;
+          await this.plugin.saveSettings();
         }));
 
     const locations: Record<string, string[]> = {
@@ -206,8 +212,9 @@ class MastermindSettingTab extends PluginSettingTab {
           locs.forEach((loc: string) => dropdown.addOption(loc, `${region} - ${loc}`));
         }
         dropdown.setValue(this.plugin.settings.location)
-          .onChange((value) => {
+          .onChange(async (value) => {
             this.plugin.settings.location = value;
+            await this.plugin.saveSettings();
           });
       });
 
@@ -218,14 +225,15 @@ class MastermindSettingTab extends PluginSettingTab {
       .addDropdown(dropdown => {
         const options = this.plugin.settings.availableModels.length > 0
           ? this.plugin.settings.availableModels
-          : [this.plugin.settings.modelId, 'gemini-1.5-pro', 'gemini-1.5-flash'];
+          : [this.plugin.settings.modelId, 'gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'];
 
         const uniqueOptions = [...new Set(options)];
         uniqueOptions.forEach(m => dropdown.addOption(m, m));
 
         dropdown.setValue(this.plugin.settings.modelId);
-        dropdown.onChange((value) => {
+        dropdown.onChange(async (value) => {
           this.plugin.settings.modelId = value;
+          await this.plugin.saveSettings();
         });
         this.modelDropdown = dropdown;
       })
@@ -249,6 +257,7 @@ class MastermindSettingTab extends PluginSettingTab {
 
               this.plugin.settings.modelId = models[0];
               this.plugin.settings.availableModels = models;
+              await this.plugin.saveSettings();
               new Notice(`Fetched ${models.length} models.`);
             } else {
               new Notice('No additional models found.');
@@ -259,14 +268,44 @@ class MastermindSettingTab extends PluginSettingTab {
           }
         }));
 
+    containerEl.createEl('h3', { text: 'Generation Parameters' });
+
+    new Setting(containerEl)
+      .setName('Max Output Tokens')
+      .setDesc('Maximum number of tokens to generate (e.g., 8192).')
+      .addText(text => text
+        .setValue(String(this.plugin.settings.maxOutputTokens))
+        .onChange(async (value) => {
+          const numeric = parseInt(value);
+          if (!isNaN(numeric)) {
+            this.plugin.settings.maxOutputTokens = numeric;
+            await this.plugin.saveSettings();
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Temperature')
+      .setDesc('Creativity (0.0 - 2.0). Higher values = more creative.')
+      .addSlider(slider => slider
+        .setLimits(0.0, 2.0, 0.1)
+        .setValue(this.plugin.settings.temperature)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.temperature = value;
+          await this.plugin.saveSettings();
+        }));
+
+    containerEl.createEl('h3', { text: 'Appearance & Behavior' });
+
     new Setting(containerEl)
       .setName('Profile Picture (User)')
       .setDesc('URL for your avatar.')
       .addText(text => text
         .setPlaceholder('https://...')
         .setValue(this.plugin.settings.profilePictureUser)
-        .onChange((value) => {
+        .onChange(async (value) => {
           this.plugin.settings.profilePictureUser = value;
+          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
@@ -275,8 +314,9 @@ class MastermindSettingTab extends PluginSettingTab {
       .addText(text => text
         .setPlaceholder('https://...')
         .setValue(this.plugin.settings.profilePictureAI)
-        .onChange((value) => {
+        .onChange(async (value) => {
           this.plugin.settings.profilePictureAI = value;
+          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
@@ -285,8 +325,9 @@ class MastermindSettingTab extends PluginSettingTab {
       .addTextArea(text => text
         .setPlaceholder('You are an expert coder...')
         .setValue(this.plugin.settings.customContextPrompt)
-        .onChange((value) => {
+        .onChange(async (value) => {
           this.plugin.settings.customContextPrompt = value;
+          await this.plugin.saveSettings();
         }));
 
     new Setting(containerEl)
@@ -294,31 +335,10 @@ class MastermindSettingTab extends PluginSettingTab {
       .setDesc('If enabled, Mastermind will ask before deleting files.')
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.confirmDestructive)
-        .onChange((value) => {
+        .onChange(async (value) => {
           this.plugin.settings.confirmDestructive = value;
+          await this.plugin.saveSettings();
         }));
-
-    // --- SAVE BUTTON ---
-    containerEl.createEl('hr');
-    const navActions = containerEl.createDiv({ cls: 'mastermind-settings-actions' });
-    navActions.style.display = 'flex';
-    navActions.style.justifyContent = 'flex-end';
-    navActions.style.marginTop = '20px';
-
-    const saveBtn = navActions.createEl('button', {
-      cls: 'mod-cta',
-      text: 'Save Settings'
-    });
-
-    saveBtn.onclick = async () => {
-      try {
-        await this.plugin.saveSettings();
-        new Notice('Mastermind settings saved and synced.');
-      } catch (e) {
-        new Notice('Failed to save settings.');
-        console.error(e);
-      }
-    };
   }
 
 }
