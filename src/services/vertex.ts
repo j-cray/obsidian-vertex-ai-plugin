@@ -2,8 +2,6 @@ import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import * as https from 'https';
-import { URL } from 'url';
 
 const execAsync = promisify(exec);
 
@@ -596,199 +594,215 @@ Then provide your final answer.`;
       ]
     };
 
-    const stream = this.streamRequest(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-      body: JSON.stringify(body)
-    });
+    // --- NODE JS HTTPS STREAMING ---
+    console.log(`Mastermind: Starting stream request to ${url}`);
+
+    let stream;
+    try {
+      stream = this.streamRequest(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      console.error("Mastermind: Failed to initiate stream", e);
+      throw e;
+    }
 
     let buffer = '';
     let accumulatedText = initialText;
     let accumulatedThinking = initialThinking;
     let isThinking = false;
     let accumulatedFunctions: any[] = [];
+    let chunkCount = 0;
 
     // STREAMING LOOP
-    for await (const chunk of stream) {
-      // Handle SSE format "data: JSON\n\n"
-      const lines = (buffer + chunk).split('\n');
-      buffer = lines.pop() || ''; // Keep partial line
+    try {
+      for await (const chunk of stream) {
+        chunkCount++;
+        // Handle SSE format "data: JSON\n\n"
+        const lines = (buffer + chunk).split('\n');
+        buffer = lines.pop() || ''; // Keep partial line
 
-      for (const line of lines) {
-        if (!line.trim() || line.startsWith(':')) continue; // skip comments/empty
-        const jsonStr = line.replace(/^data:\s*/, '').trim();
-        if (!jsonStr) continue;
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(':')) continue; // skip comments/empty
+          const jsonStr = line.replace(/^data:\s*/, '').trim();
+          if (!jsonStr) continue;
 
-        try {
-          const data = JSON.parse(jsonStr);
-          const candidates = data.candidates;
-          if (candidates && candidates[0]) {
-            const candidate = candidates[0];
-            if (candidate.content && candidate.content.parts) {
-              for (const part of candidate.content.parts) {
-                if (part.text) {
-                  // THINKING PARSER
-                  let textPart = part.text;
+          try {
+            const data = JSON.parse(jsonStr);
+            const candidates = data.candidates;
+            if (candidates && candidates[0]) {
+              const candidate = candidates[0];
+              if (candidate.content && candidate.content.parts) {
+                for (const part of candidate.content.parts) {
+                  if (part.text) {
+                    // THINKING PARSER
+                    let textPart = part.text;
 
-                  // Check for thinking block transitions
-                  // Simple regex split is not enough for streaming.
-                  // Logic: Scan textPart. If we hit ```thinking, switch state. If we hit ``` in thinking, switch back.
+                    // Check for thinking block transitions
+                    // Simple regex split is not enough for streaming.
+                    // Logic: Scan textPart. If we hit ```thinking, switch state. If we hit ``` in thinking, switch back.
 
-                  let remaining = textPart;
-                  while (remaining.length > 0) {
-                    if (!isThinking) {
-                      const startIdx = remaining.indexOf('```thinking');
-                      if (startIdx !== -1) {
-                        // Found start
-                        accumulatedText += remaining.substring(0, startIdx);
-                        remaining = remaining.substring(startIdx + 11); // Skip marker
-                        isThinking = true;
+                    let remaining = textPart;
+                    while (remaining.length > 0) {
+                      if (!isThinking) {
+                        const startIdx = remaining.indexOf('```thinking');
+                        if (startIdx !== -1) {
+                          // Found start
+                          accumulatedText += remaining.substring(0, startIdx);
+                          remaining = remaining.substring(startIdx + 11); // Skip marker
+                          isThinking = true;
+                        } else {
+                          accumulatedText += remaining;
+                          remaining = '';
+                        }
                       } else {
-                        accumulatedText += remaining;
-                        remaining = '';
-                      }
-                    } else {
-                      // inside thinking
-                      const endIdx = remaining.indexOf('```');
-                      if (endIdx !== -1) {
-                        // Found end
-                        accumulatedThinking += remaining.substring(0, endIdx);
-                        remaining = remaining.substring(endIdx + 3);
-                        isThinking = false;
-                      } else {
-                        accumulatedThinking += remaining;
-                        remaining = '';
+                        // inside thinking
+                        const endIdx = remaining.indexOf('```');
+                        if (endIdx !== -1) {
+                          // Found end
+                          accumulatedThinking += remaining.substring(0, endIdx);
+                          remaining = remaining.substring(endIdx + 3);
+                          isThinking = false;
+                        } else {
+                          accumulatedThinking += remaining;
+                          remaining = '';
+                        }
                       }
                     }
+
+                    // Yield Update
+                    yield {
+                      text: accumulatedText,
+                      isThinking: isThinking,
+                      thinkingText: accumulatedThinking,
+                      actions: []
+                    };
+
+                  } else if (part.functionCall) {
+                    // Buffer function calls (they might span chunks? Vertex usually acts politely and sends full objects in SSE, but let's be safe and just push)
+                    accumulatedFunctions.push(part.functionCall);
                   }
-
-                  // Yield Update
-                  yield {
-                    text: accumulatedText,
-                    isThinking: isThinking,
-                    thinkingText: accumulatedThinking,
-                    actions: []
-                  };
-
-                } else if (part.functionCall) {
-                  // Buffer function calls (they might span chunks? Vertex usually acts politely and sends full objects in SSE, but let's be safe and just push)
-                  accumulatedFunctions.push(part.functionCall);
                 }
               }
             }
+          } catch (e) {
+            console.error("JSON Parse Error in Stream", e);
           }
-        } catch (e) {
-          console.error("JSON Parse Error in Stream", e);
         }
       }
-    }
 
-    // END OF STREAM ACTIONS
-    if (accumulatedFunctions.length > 0) {
-      // Execute Tools
-      const executedActions: ToolAction[] = [];
+      // END OF STREAM ACTIONS
+      if (accumulatedFunctions.length > 0) {
+        // Execute Tools
+        const executedActions: ToolAction[] = [];
 
-      // Add model's thinking so far to history
-      contents.push({
-        role: 'model',
-        parts: [{ text: accumulatedText || ' ', functionCall: accumulatedFunctions[0] }] // Simplified history push
-      });
+        // Add model's thinking so far to history
+        contents.push({
+          role: 'model',
+          parts: [{ text: accumulatedText || ' ', functionCall: accumulatedFunctions[0] }] // Simplified history push
+        });
 
-      const functionResponseParts: any[] = [];
+        const functionResponseParts: any[] = [];
 
-      for (const funcCall of accumulatedFunctions) {
-        const { name, args } = funcCall;
-        let result: any;
+        for (const funcCall of accumulatedFunctions) {
+          const { name, args } = funcCall;
+          let result: any;
 
-        // EXECUTE TOOL (Copied logic)
-        yield { text: accumulatedText, thinkingText: accumulatedThinking, actions: [{ tool: name, input: args, status: 'pending' }] };
+          // EXECUTE TOOL (Copied logic)
+          yield { text: accumulatedText, thinkingText: accumulatedThinking, actions: [{ tool: name, input: args, status: 'pending' }] };
 
-        try {
-          console.log(`Mastermind: Executing tool ${name}`, args);
+          try {
+            console.log(`Mastermind: Executing tool ${name}`, args);
 
-          if (name === 'generate_image') {
-            new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
-            console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
-            const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
-            result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
-          } else if (name === 'list_files') {
-            result = await vaultService.listMarkdownFiles();
-          } else if (name === 'read_file') {
-            result = await vaultService.getFileContent(args.path);
-          } else if (name === 'search_content') {
-            result = await vaultService.searchVault(args.query);
-          } else if (name === 'create_note') {
-            await vaultService.createNote(args.path, args.content);
-            result = { status: 'success', message: `Note created at ${args.path}` };
-          } else if (name === 'create_folder') {
-            await vaultService.createFolder(args.path);
-            result = { status: 'success', message: `Folder created at ${args.path}` };
-          } else if (name === 'list_directory') {
-            result = await vaultService.listFolder(args.path);
-          } else if (name === 'move_file') {
-            await vaultService.moveFile(args.oldPath, args.newPath);
-            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-          } else if (name === 'delete_file') {
-            await vaultService.deleteFile(args.path);
-            result = { status: 'success', message: `File deleted at ${args.path}` };
-          } else if (name === 'append_to_note') {
-            await vaultService.appendToNote(args.path, args.content);
-            result = { status: 'success', message: `Appended content to ${args.path}` };
-          } else if (name === 'prepend_to_note') {
-            await vaultService.prependToNote(args.path, args.content);
-            result = { status: 'success', message: `Prepended content to ${args.path}` };
-          } else if (name === 'update_section') {
-            await vaultService.updateNoteSection(args.path, args.header, args.content);
-            result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
-          } else if (name === 'get_tags') {
-            const tags = await vaultService.getTags();
-            result = { status: 'success', tags: tags };
-          } else if (name === 'get_links') {
-            const links = await vaultService.getLinks(args.path);
-            result = { status: 'success', links: links };
-          } else if (name === 'run_terminal_command') {
-            // Security Check
-            // @ts-ignore
-            if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
-              throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
+            if (name === 'generate_image') {
+              new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
+              console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
+              const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
+              result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
+            } else if (name === 'list_files') {
+              result = await vaultService.listMarkdownFiles();
+            } else if (name === 'read_file') {
+              result = await vaultService.getFileContent(args.path);
+            } else if (name === 'search_content') {
+              result = await vaultService.searchVault(args.query);
+            } else if (name === 'create_note') {
+              await vaultService.createNote(args.path, args.content);
+              result = { status: 'success', message: `Note created at ${args.path}` };
+            } else if (name === 'create_folder') {
+              await vaultService.createFolder(args.path);
+              result = { status: 'success', message: `Folder created at ${args.path}` };
+            } else if (name === 'list_directory') {
+              result = await vaultService.listFolder(args.path);
+            } else if (name === 'move_file') {
+              await vaultService.moveFile(args.oldPath, args.newPath);
+              result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+            } else if (name === 'delete_file') {
+              await vaultService.deleteFile(args.path);
+              result = { status: 'success', message: `File deleted at ${args.path}` };
+            } else if (name === 'append_to_note') {
+              await vaultService.appendToNote(args.path, args.content);
+              result = { status: 'success', message: `Appended content to ${args.path}` };
+            } else if (name === 'prepend_to_note') {
+              await vaultService.prependToNote(args.path, args.content);
+              result = { status: 'success', message: `Prepended content to ${args.path}` };
+            } else if (name === 'update_section') {
+              await vaultService.updateNoteSection(args.path, args.header, args.content);
+              result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
+            } else if (name === 'get_tags') {
+              const tags = await vaultService.getTags();
+              result = { status: 'success', tags: tags };
+            } else if (name === 'get_links') {
+              const links = await vaultService.getLinks(args.path);
+              result = { status: 'success', links: links };
+            } else if (name === 'run_terminal_command') {
+              // Security Check
+              // @ts-ignore
+              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
+                throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
+              }
+
+              try {
+                const { stdout, stderr } = await execAsync(args.command);
+                result = { status: 'success', stdout: stdout, stderr: stderr };
+              } catch (e: any) {
+                result = { status: 'error', message: e.message, stderr: e.stderr };
+              }
+            } else if (name === 'fetch_url') {
+              try {
+                const response = await requestUrl({ url: args.url });
+                // Limit size to avoid context overflow
+                const text = response.text.substring(0, 10000);
+                result = { status: 'success', content_snippet: text, full_length: response.text.length };
+              } catch (e: any) {
+                result = { status: 'error', message: e.message };
+              }
+            } else {
+              result = { status: 'error', message: `Unknown tool: ${name}` };
             }
 
-            try {
-              const { stdout, stderr } = await execAsync(args.command);
-              result = { status: 'success', stdout: stdout, stderr: stderr };
-            } catch (e: any) {
-              result = { status: 'error', message: e.message, stderr: e.stderr };
-            }
-          } else if (name === 'fetch_url') {
-            try {
-              const response = await requestUrl({ url: args.url });
-              // Limit size to avoid context overflow
-              const text = response.text.substring(0, 10000);
-              result = { status: 'success', content_snippet: text, full_length: response.text.length };
-            } catch (e: any) {
-              result = { status: 'error', message: e.message };
-            }
-          } else {
-            result = { status: 'error', message: `Unknown tool: ${name}` };
+          } catch (e: any) {
+            result = { status: 'error', message: e.message };
           }
 
-        } catch (e: any) {
-          result = { status: 'error', message: e.message };
+          executedActions.push({ tool: name, input: args, output: result, status: result.status });
+          functionResponseParts.push({ functionResponse: { name, response: { content: result } } });
         }
 
-        executedActions.push({ tool: name, input: args, output: result, status: result.status });
-        functionResponseParts.push({ functionResponse: { name, response: { content: result } } });
+        // RECURSIVE CALL with Tool Outputs
+        contents.push({ role: 'user', parts: functionResponseParts });
+
+        // Yield * chatInternal (Recursive)
+        // We need to pass the updated 'contents' as 'history' but carefully.
+        // Actually, to avoid infinite recursion complexity in this single step,
+        // I will just yield the final result for now or rely on the fact that existing flow expects text.
+        // Recursion:
+        yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking);
       }
-
-      // RECURSIVE CALL with Tool Outputs
-      contents.push({ role: 'user', parts: functionResponseParts });
-
-      // Yield * chatInternal (Recursive)
-      // We need to pass the updated 'contents' as 'history' but carefully.
-      // Actually, to avoid infinite recursion complexity in this single step,
-      // I will just yield the final result for now or rely on the fact that existing flow expects text.
-      // But for "Thinking", we want        // Recursion:
-      yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking);
+    } catch (e) {
+      console.error("Mastermind: Streaming Loop Error", e);
+      throw e;
     }
   }
 
@@ -839,7 +853,10 @@ Then provide your final answer.`;
     }
   }
   // Node.js HTTPS Streaming Helper
+  // Node.js HTTPS Streaming Helper
   private async *streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
+    const https = require('https');
+    const { URL } = require('url');
     const url = new URL(urlStr);
     const reqOptions = {
       hostname: url.hostname,
@@ -849,71 +866,82 @@ Then provide your final answer.`;
       headers: options.headers
     };
 
-    // Create a promise to handle the response stream
-    const responseQueue: (string | null)[] = [];
-    let resolveQueue: (() => void) | null = null;
-    let error: Error | null = null;
-    let finished = false;
+    const queue = new AsyncQueue<string>();
 
-    const push = (val: string | null) => {
-      responseQueue.push(val);
-      if (resolveQueue) {
-        const res = resolveQueue;
-        resolveQueue = null;
-        res();
-      }
-    };
-
-    const req = https.request(reqOptions, (res) => {
+    const req = https.request(reqOptions, (res: any) => {
       if (res.statusCode && res.statusCode >= 300) {
-        error = new Error(`HTTP Error ${res.statusCode}`);
-        push(null);
+        queue.fail(new Error(`HTTP Error ${res.statusCode}`));
         return;
       }
-
       res.setEncoding('utf8');
-      res.on('data', (chunk) => push(chunk));
-      res.on('end', () => {
-        finished = true;
-        push(null);
-      });
-      res.on('error', (err) => {
-        error = err;
-        push(null);
-      });
+      res.on('data', (chunk: string) => queue.push(chunk));
+      res.on('end', () => queue.close());
+      res.on('error', (err: Error) => queue.fail(err));
     });
 
-    req.on('error', (err) => {
-      error = err;
-      push(null);
-    });
-
+    req.on('error', (err: any) => queue.fail(err));
     req.write(options.body);
     req.end();
 
-    // Yield Loop
-    while (true) {
-      if (responseQueue.length > 0) {
-        const val = responseQueue.shift();
-        if (val === null) {
-          if (error) throw error;
-          if (finished && responseQueue.length === 0) break;
-          continue; // Loop again to check done state
-        }
-        if (val) yield val;
-      } else {
-        if (finished || error) { // Double check if finished while waiting
-          const val = responseQueue.shift();
-          if (val === null) {
-            if (error) throw error;
-            break;
-          }
-          if (val) yield val;
-          else break;
-        }
-        // Wait for next chunk
-        await new Promise<void>(resolve => resolveQueue = resolve);
-      }
+    yield* queue;
+  }
+}
+
+// Simple Async Queue for buffering stream events
+class AsyncQueue<T> {
+  private queue: T[] = [];
+  private resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+  private rejectNext: ((reason?: any) => void) | null = null;
+  private closed = false;
+  private error: Error | null = null;
+
+  push(value: T) {
+    if (this.closed) return;
+    if (this.resolveNext) {
+      const resolve = this.resolveNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      resolve({ value, done: false });
+    } else {
+      this.queue.push(value);
     }
+  }
+
+  close() {
+    this.closed = true;
+    if (this.resolveNext) {
+      const resolve = this.resolveNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      resolve({ value: undefined as any, done: true });
+    }
+  }
+
+  fail(err: Error) {
+    this.error = err;
+    if (this.rejectNext) {
+      const reject = this.rejectNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      reject(err);
+    }
+  }
+
+  [Symbol.asyncIterator]() {
+    return {
+      next: () => {
+        if (this.error) return Promise.reject(this.error);
+        if (this.queue.length > 0) {
+          return Promise.resolve({ value: this.queue.shift()!, done: false });
+        }
+        if (this.closed) {
+          return Promise.resolve({ value: undefined as any, done: true });
+        }
+        return new Promise<IteratorResult<T>>((resolve, reject) => {
+          this.resolveNext = resolve;
+          this.rejectNext = reject;
+        });
+      }
+    };
   }
 }
