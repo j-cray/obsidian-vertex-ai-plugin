@@ -59,7 +59,7 @@ export class MessageRenderer {
     let currentText = '';
     let currentThinking = '';
 
-    const update = async (response: import('../types').ChatResponse) => {
+    const update = async (response: import('../types').ChatResponse, isFinal: boolean = false) => {
       // console.log('Mastermind: Renderer updating...', response);
       // 1. Tools
       if (response.actions && response.actions.length > 0) {
@@ -88,10 +88,19 @@ export class MessageRenderer {
 
       // 3. Text
       if (response.text && response.text !== currentText) {
-        textContainer.empty();
-        const component = new Component();
-        component.load();
-        await MarkdownRenderer.render(this.app, response.text, textContainer, '', component);
+        if (!isFinal) {
+          // Streaming Mode: Text content only (High Performance, No Flicker)
+          // We use a pre-like styling or just generic text for the stream
+          textContainer.innerText = response.text;
+          textContainer.style.whiteSpace = 'pre-wrap'; // Preserve format during stream
+        } else {
+          // Final Mode: Full Markdown Render
+          textContainer.empty();
+          textContainer.style.whiteSpace = 'normal'; // Reset format
+          const component = new Component();
+          component.load();
+          await MarkdownRenderer.render(this.app, response.text, textContainer, '', component);
+        }
         currentText = response.text;
       }
 

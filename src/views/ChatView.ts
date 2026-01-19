@@ -218,7 +218,7 @@ export class MastermindChatView extends ItemView {
 
       for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images)) {
         console.log('Mastermind: View received chunk', chunk);
-        await update(chunk);
+        await update(chunk, false); // isFinal = false
         finalResponse = chunk;
       }
 
@@ -226,7 +226,7 @@ export class MastermindChatView extends ItemView {
       if (finalResponse.text) {
         const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
         finalResponse.text = enhancedText;
-        await update(finalResponse);
+        await update(finalResponse, true); // isFinal = true
       }
 
       // State Updates
@@ -265,7 +265,7 @@ export class MastermindChatView extends ItemView {
       }
 
       // Update the streaming message with the error
-      update({ text: `**Error**: ${errorMessage}${helpfulTip}`, actions: [] });
+      update({ text: `**Error**: ${errorMessage}${helpfulTip}`, actions: [] }, true);
       new Notice('Mastermind Chat failed.');
     }
   }
