@@ -807,7 +807,7 @@ Then provide your final answer.`;
             } else if (name === 'run_terminal_command') {
               // Security Check
               // @ts-ignore
-              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
+              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmDestructive) {
                 throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
               }
 
