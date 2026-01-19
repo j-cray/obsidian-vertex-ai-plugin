@@ -507,9 +507,7 @@ Then provide your final answer.`;
               required: ['oldPath', 'newPath']
             }
           },
-          {
-            googleSearchRetrieval: {}
-          },
+
           {
             name: 'run_terminal_command',
             description: 'Executes a shell command on the host OS. Use with caution.',
@@ -583,7 +581,8 @@ Then provide your final answer.`;
               required: ['path']
             }
           }
-        ]
+        ],
+        googleSearchRetrieval: {}
       }
     ];
 
