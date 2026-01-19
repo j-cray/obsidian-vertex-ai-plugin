@@ -205,6 +205,7 @@ export class MastermindChatView extends ItemView {
 
     try {
       this.vertexService.updateSettings(this.plugin.settings);
+      new Notice('Mastermind Debug: Starting chat...');
 
       console.log('Mastermind: View - getting context');
       const context = await this.vaultService.getRelevantContext(message);
