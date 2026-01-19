@@ -581,7 +581,9 @@ Then provide your final answer.`;
               required: ['path']
             }
           }
-        ],
+        ]
+      },
+      {
         googleSearchRetrieval: {}
       }
     ];
