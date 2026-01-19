@@ -425,8 +425,25 @@ export class VertexService {
     const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
     const runLocation = isGemini3 ? 'global' : effectiveLocation;
 
-    // Use streamGenerateContent
-    const url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`;
+    // DUAL PROVIDER: Build URL and headers based on auth provider
+    let url: string;
+    let authHeaders: Record<string, string>;
+
+    if (this.authProvider === 'aistudio') {
+      // AI Studio uses generativelanguage.googleapis.com with API key
+      url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelId}:streamGenerateContent?alt=sse`;
+      authHeaders = {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': this.aiStudioKey
+      };
+    } else {
+      // Vertex AI uses regional aiplatform.googleapis.com with Bearer token
+      url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`;
+      authHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      };
+    }
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
@@ -657,7 +674,7 @@ Then provide your final answer.`;
     try {
       stream = this.streamRequest(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        headers: authHeaders,
         body: JSON.stringify(body),
         signal: signal
       });

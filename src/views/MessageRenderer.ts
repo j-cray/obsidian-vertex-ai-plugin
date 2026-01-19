@@ -75,6 +75,7 @@ export class MessageRenderer {
 
     // Typewriter State
     let fullTextToRender = '';
+    let fullThinkingText = '';
     let displayedTextLength = 0;
     let isRendering = false;
     let typeWriterInterval: any = null;
@@ -135,28 +136,53 @@ export class MessageRenderer {
         await this.renderToolActions(toolContainer, response.actions);
       }
 
-      // 2. Thinking
+      // 2. Thinking - with LIVE TYPEWRITER effect
       if (response.isThinking || (response.thinkingText && response.thinkingText.length > 0)) {
         thinkingContainer.style.display = 'block';
 
         if (response.thinkingText && response.thinkingText.length > 0) {
           thinkingContent.style.display = 'block';
-          // Thinking is usually code blocks or plain text.
-          // Let's just set innerText mostly to avoid heavy MD overhead on thinking?
-          // Or partial MD.
-          // Thinking is streaming fast.
-          thinkingContent.innerText = response.thinkingText;
-
-          // Auto-scroll inside thinking box if needed?
-          // thinkingContent.scrollTop = thinkingContent.scrollHeight;
-
           dotsContainer.style.display = 'none';
+
+          // LIVE TYPEWRITER: Queue-based character reveal
+          const targetText = response.thinkingText;
+          const currentDisplayed = thinkingContent.innerText.length;
+
+          if (targetText.length > currentDisplayed) {
+            // Start typewriter interval if not already running
+            if (!typeWriterInterval) {
+              typeWriterInterval = setInterval(() => {
+                const current = thinkingContent.innerText;
+                const target = fullThinkingText;
+
+                if (current.length < target.length) {
+                  // Add characters progressively (5 chars per tick for speed)
+                  const charsToAdd = Math.min(5, target.length - current.length);
+                  thinkingContent.innerText = target.substring(0, current.length + charsToAdd);
+                  // Auto-scroll to bottom of thinking container
+                  thinkingContent.scrollTop = thinkingContent.scrollHeight;
+                } else {
+                  // Caught up, clear interval
+                  clearInterval(typeWriterInterval);
+                  typeWriterInterval = null;
+                }
+              }, 20); // 20ms = 50 updates/sec, smooth feel
+            }
+          }
+
+          // Update target text for the interval to chase
+          fullThinkingText = targetText;
         } else {
           dotsContainer.style.display = 'flex';
         }
 
         if (!response.isThinking && response.thinkingText) {
-          // Done thinking
+          // Done thinking - ensure all text is displayed
+          thinkingContent.innerText = response.thinkingText;
+          if (typeWriterInterval) {
+            clearInterval(typeWriterInterval);
+            typeWriterInterval = null;
+          }
           dotsContainer.style.display = 'none';
           thinkingContainer.addClass('thinking-code-block');
         }
