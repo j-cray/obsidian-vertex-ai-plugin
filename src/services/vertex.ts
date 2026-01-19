@@ -588,7 +588,11 @@ Then provide your final answer.`;
       }
     ];
 
-    let contents: any[] = [...history];
+    // Sanitize history to remove plugin-internal fields like 'actions'
+    let contents: any[] = history.map(item => ({
+      role: item.role,
+      parts: item.parts
+    }));
 
     // Process images
     const pParts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
