@@ -50,58 +50,76 @@ export class MessageRenderer {
     const avatar = msgBlock.createEl('img', { cls: 'chat-avatar', attr: { src: avatarUrl } });
     const contentContainer = msgBlock.createDiv('chat-message-content message-ai');
 
-    // State Containers
+    // 1. Tool Actions Container
     const toolContainer = contentContainer.createDiv('chat-tool-actions');
+
+    // 2. Thinking Container (Card Style)
     const thinkingContainer = contentContainer.createDiv('thinking-container');
-    thinkingContainer.style.display = 'none'; // Hide initially
+    thinkingContainer.style.display = 'none';
+
+    // Header with Icon & Text
+    const thinkingHeader = thinkingContainer.createDiv('thinking-header');
+    setIcon(thinkingHeader.createSpan('thinking-icon'), 'brain-circuit');
+    thinkingHeader.createSpan().innerText = 'Thinking Process';
+
+    // Dots Animation (Visible when thinking, hidden when text arrives?)
+    const dotsContainer = thinkingContainer.createDiv('thinking-dots');
+    dotsContainer.innerHTML = '<div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div>';
+
+    // Actual Content (Hidden by default or collateral?)
+    const thinkingContent = thinkingContainer.createDiv('thinking-content');
+    thinkingContent.style.display = 'none'; // Only show if we have text to show
+
+    // 3. Response Text Container
     const textContainer = contentContainer.createDiv('chat-text-content');
 
     let currentText = '';
-    let currentThinking = '';
+    let lastRenderTime = 0;
 
+    // Debounce Loop for Markdown Rendering
     const update = async (response: import('../types').ChatResponse, isFinal: boolean = false) => {
-      // console.log('Mastermind: Renderer updating...', response);
       // 1. Tools
       if (response.actions && response.actions.length > 0) {
-        toolContainer.empty(); // Simple re-render for now (could be optimized)
+        toolContainer.empty();
         await this.renderToolActions(toolContainer, response.actions);
       }
 
       // 2. Thinking
       if (response.isThinking || response.thinkingText) {
         thinkingContainer.style.display = 'block';
-        if (!thinkingContainer.querySelector('.thinking-header')) {
-          const header = thinkingContainer.createDiv('thinking-header');
-          setIcon(header.createSpan('thinking-icon'), 'brain-circuit');
-          header.createSpan().innerText = 'Thinking Process';
+
+        // If we have text, show it. If purely "isThinking" signals but no text, show dots.
+        if (response.thinkingText && response.thinkingText.trim()) {
+          thinkingContent.style.display = 'block';
+          thinkingContent.innerText = response.thinkingText;
+          dotsContainer.style.display = 'none'; // Hide dots if showing text trace? Or keep both?
+          // User "awful" comment suggests they want to see it or NOT see it cleanly.
+          // Let's keep dots for "active" state but text is useful history.
+        } else if (response.isThinking) {
+          dotsContainer.style.display = 'flex';
         }
 
-        let contentEl = thinkingContainer.querySelector('.thinking-content') as HTMLElement;
-        if (!contentEl) contentEl = thinkingContainer.createDiv('thinking-content');
-
-        // Only update if changed to avoid cursor jumping if we were editable (we aren't)
-        if (response.thinkingText !== currentThinking) {
-          contentEl.innerText = response.thinkingText || '';
-          currentThinking = response.thinkingText || '';
+        if (!response.isThinking && response.thinkingText) {
+          // Finished thinking
+          dotsContainer.style.display = 'none';
+          thinkingContainer.addClass('thinking-code-block'); // Collapsed style?
         }
       }
 
-      // 3. Text
+      // 3. Text (Debounced Markdown)
       if (response.text && response.text !== currentText) {
-        if (!isFinal) {
-          // Streaming Mode: Text content only (High Performance, No Flicker)
-          // We use a pre-like styling or just generic text for the stream
-          textContainer.innerText = response.text;
-          textContainer.style.whiteSpace = 'pre-wrap'; // Preserve format during stream
-        } else {
-          // Final Mode: Full Markdown Render
+        const now = Date.now();
+        // Render if final OR > 100ms since last render
+        if (isFinal || (now - lastRenderTime > 100)) {
           textContainer.empty();
-          textContainer.style.whiteSpace = 'normal'; // Reset format
           const component = new Component();
           component.load();
           await MarkdownRenderer.render(this.app, response.text, textContainer, '', component);
+          lastRenderTime = now;
+          currentText = response.text;
         }
-        currentText = response.text;
+      } else if (!response.text && textContainer.innerText === '') {
+        // Ensure empty container doesn't collapse layout if needed
       }
 
       this.scrollBottom();

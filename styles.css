@@ -249,6 +249,18 @@
     }
 }
 
+/* Finished Thinking State */
+.thinking-code-block {
+    opacity: 0.6;
+    border-left-color: var(--text-muted);
+}
+
+.thinking-code-block .thinking-content {
+    background: transparent;
+    font-style: normal;
+    color: var(--text-muted);
+}
+
 /* INPUT AREA FIXES */
 .chat-input-wrapper {
     background: transparent;
