@@ -2,6 +2,8 @@ import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as https from 'https';
+import { URL } from 'url';
 
 const execAsync = promisify(exec);
 
@@ -594,18 +596,11 @@ Then provide your final answer.`;
       ]
     };
 
-    const response = await fetch(url, {
+    const stream = this.streamRequest(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
       body: JSON.stringify(body)
     });
-
-    if (!response.ok || !response.body) {
-      throw new Error(`Vertex AI Streaming Error ${response.status}: ${response.statusText}`);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
 
     let buffer = '';
     let accumulatedText = initialText;
@@ -614,11 +609,7 @@ Then provide your final answer.`;
     let accumulatedFunctions: any[] = [];
 
     // STREAMING LOOP
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
+    for await (const chunk of stream) {
       // Handle SSE format "data: JSON\n\n"
       const lines = (buffer + chunk).split('\n');
       buffer = lines.pop() || ''; // Keep partial line
@@ -845,6 +836,84 @@ Then provide your final answer.`;
       return true;
     } catch {
       return false;
+    }
+  }
+  // Node.js HTTPS Streaming Helper
+  private async *streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
+    const url = new URL(urlStr);
+    const reqOptions = {
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname + url.search,
+      method: options.method,
+      headers: options.headers
+    };
+
+    // Create a promise to handle the response stream
+    const responseQueue: (string | null)[] = [];
+    let resolveQueue: (() => void) | null = null;
+    let error: Error | null = null;
+    let finished = false;
+
+    const push = (val: string | null) => {
+      responseQueue.push(val);
+      if (resolveQueue) {
+        const res = resolveQueue;
+        resolveQueue = null;
+        res();
+      }
+    };
+
+    const req = https.request(reqOptions, (res) => {
+      if (res.statusCode && res.statusCode >= 300) {
+        error = new Error(`HTTP Error ${res.statusCode}`);
+        push(null);
+        return;
+      }
+
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => push(chunk));
+      res.on('end', () => {
+        finished = true;
+        push(null);
+      });
+      res.on('error', (err) => {
+        error = err;
+        push(null);
+      });
+    });
+
+    req.on('error', (err) => {
+      error = err;
+      push(null);
+    });
+
+    req.write(options.body);
+    req.end();
+
+    // Yield Loop
+    while (true) {
+      if (responseQueue.length > 0) {
+        const val = responseQueue.shift();
+        if (val === null) {
+          if (error) throw error;
+          if (finished && responseQueue.length === 0) break;
+          continue; // Loop again to check done state
+        }
+        if (val) yield val;
+      } else {
+        if (finished || error) { // Double check if finished while waiting
+          const val = responseQueue.shift();
+          if (val === null) {
+            if (error) throw error;
+            break;
+          }
+          if (val) yield val;
+          else break;
+        }
+        // Wait for next chunk
+        await new Promise<void>(resolve => resolveQueue = resolve);
+      }
     }
   }
 }
