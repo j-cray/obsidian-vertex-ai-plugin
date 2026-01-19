@@ -200,14 +200,6 @@ export class VertexService {
   }
 
   async listModels(): Promise<string[]> {
-    const accessToken = await this.getAccessToken();
-    const projectId = this.getProjectId();
-
-    // Default discovery location to us-central1 if global/undefined, as Model Garden is centralized there
-    const discoveryLocation = this.location === 'global' || !this.location ? 'us-central1' : this.location;
-
-    new Notice(`Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`);
-
     const FALLBACK_MODELS = [
       // GEMINI 3 (Preview - Global Only)
       'gemini-3-pro-preview',
@@ -229,79 +221,122 @@ export class VertexService {
     ];
 
     const foundModels: Set<string> = new Set();
+    const uniqueFallbacks = new Set(FALLBACK_MODELS); // Use Set to avoid dupes if API returns them
 
-    // Helper: Safe Fetch
-    const safeFetch = async (url: string, label: string): Promise<any[]> => {
-      try {
-        console.log(`Mastermind: Fetching ${label} from ${url}`);
-        const response = await requestUrl({
-          url,
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.status === 200 && response.json.models) {
-          return response.json.models;
-        } else if (response.status === 200 && response.json.publisherModels) {
-          return response.json.publisherModels;
-        } else {
-          console.warn(`Mastermind: ${label} returned status ${response.status}`);
-          return [];
+    try {
+      // BRANCH 1: AI STUDIO
+      if (this.authProvider === 'aistudio') {
+        if (!this.aiStudioKey) {
+          throw new Error('AI Studio API Key is missing.');
         }
-      } catch (error) {
-        console.error(`Mastermind: Error fetching ${label}:`, error);
-        return [];
+
+        new Notice('Mastermind: Discovering AI Studio models...');
+        try {
+          const response = await requestUrl({
+            url: `https://generativelanguage.googleapis.com/v1beta/models?key=${this.aiStudioKey}`,
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+
+          if (response.status === 200 && response.json.models) {
+            response.json.models.forEach((m: any) => {
+              const name = m.name.split('/').pop(); // "models/gemini-pro" -> "gemini-pro"
+              if (name.includes('gemini')) {
+                foundModels.add(name);
+              }
+            });
+          } else {
+            console.warn('Mastermind: AI Studio listing returned unexpected status', response.status);
+          }
+        } catch (e) {
+          console.error('Mastermind: AI Studio discovery failed', e);
+          // Don't throw, just continue to fallbacks
+        }
+
       }
-    };
+      // BRANCH 2: VERTEX AI
+      else {
+        const projectId = this.getProjectId();
+        const accessToken = await this.getAccessToken(); // Might throw if auth invalid
 
-    // 1. Fetch Publisher Models (Google / Gemini)
-    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT}/locations/{LOCATION}/publishers/google/models
-    // Note: Use v1beta1 for ListPublisherModels as it is more reliable for new models and supported by documentation.
-    const publisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${discoveryLocation}/publishers/google/models`;
-    const publisherModels = await safeFetch(publisherUrl, 'Publisher Models');
+        // Multi-Pass Discovery
+        // Pass 1: Selected Region
+        // Pass 2: us-central1 (if Pass 1 != us-central1)
 
-    publisherModels.forEach((m: any) => {
-      // Filter for relevant models (Gemini, PaLM, Codey) to avoid noise
-      const name = m.name.split('/').pop();
-      if (name.includes('gemini') || name.includes('bison') || name.includes('unicorn')) {
-        foundModels.add(name);
+        const regionsToTry = [this.location || 'us-central1'];
+        if (regionsToTry[0] !== 'us-central1' && regionsToTry[0] !== 'global') {
+          regionsToTry.push('us-central1');
+        }
+
+        new Notice(`Mastermind: Discovering models (Project: ${projectId})...`);
+
+        for (const region of regionsToTry) {
+          // Skip if global - 'global' region often 404s on listModels, better to use us-central1
+          const searchRegion = region === 'global' ? 'us-central1' : region;
+
+          console.log(`Mastermind: Discovery pass for region ${searchRegion}`);
+
+          // Fetch Publisher Models
+          const pubUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${searchRegion}/publishers/google/models`;
+          try {
+            const response = await requestUrl({
+              url: pubUrl,
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+
+            if (response.status === 200 && response.json.publisherModels) {
+              response.json.publisherModels.forEach((m: any) => {
+                const name = m.name.split('/').pop();
+                if (name.includes('gemini') || name.includes('imagen')) {
+                  foundModels.add(name);
+                }
+              });
+            }
+          } catch (e) {
+            console.warn(`Mastermind: Failed to list publisher models in ${searchRegion}`, e);
+          }
+
+          // Fetch Project Models (Custom)
+          // Only try this if user actually has a project ID
+          if (projectId) {
+            const projUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${searchRegion}/models`;
+            try {
+              const response = await requestUrl({
+                url: projUrl,
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+
+              if (response.status === 200 && response.json.models) {
+                response.json.models.forEach((m: any) => {
+                  foundModels.add(m.name.split('/').pop());
+                });
+              }
+            } catch (e) {
+              console.warn(`Mastermind: Failed to list project models in ${searchRegion}`, e);
+            }
+          }
+        }
       }
-    });
 
-    // 2. Fetch Project Models (Custom / Tuned)
-    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/models
-    if (projectId) {
-      const projectUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/models`;
-      const projectModels = await safeFetch(projectUrl, 'Project Models');
-
-      projectModels.forEach((m: any) => {
-        const name = m.name.split('/').pop();
-        foundModels.add(name); // Add all custom models
-      });
+    } catch (error: any) {
+      console.error('Mastermind: Model discovery error:', error);
+      new Notice(`Mastermind Discovery Notice: ${error.message || 'Check console details'}`);
     }
 
-    // 3. Fallback / Merge
+    // ALWAYS ensure we have at least the fallbacks if nothing was found
+    // This prevents empty dropdowns which break the UI
     if (foundModels.size === 0) {
-      new Notice(`Mastermind: No models found via API. Using fallback list.`);
+      new Notice('Mastermind: No models found from API. Using fallback list.');
       return FALLBACK_MODELS;
     }
 
-    // Ensure our "known good" models are present if they weren't discovered (e.g. if region is weird)
-    // Actually, let's just return what we found, plus the fallbacks if the execution region allows?
-    // User preference: Trust the API, but if API returns nothing useful, assume connectivity issue.
-    // Let's merge found models with fallback models to ensure the user always has a choice,
-    // but put found models first? Or just sort them?
-    // Best UX: Show what is definitely available + known fallbacks.
-
-    // Add defaults to the set to ensure they are available selections
-    // Add defaults to the set to ensure they are available selections
-    FALLBACK_MODELS.forEach(m => foundModels.add(m));
+    // Merge Fallbacks into Found (so users see newly discovered ones + standard ones)
+    uniqueFallbacks.forEach(m => foundModels.add(m));
 
     const finalList = Array.from(foundModels).sort();
-    new Notice(`Mastermind: Discovery complete. Available models: ${finalList.length}`);
+    new Notice(`Mastermind: Found ${finalList.length} models.`);
     return finalList;
   }
 
