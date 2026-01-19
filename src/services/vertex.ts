@@ -650,20 +650,22 @@ Then provide your final answer.`;
     let accumulatedThinking = initialThinking;
     let isThinking = false;
     let accumulatedFunctions: any[] = [];
-    let chunkCount = 0;
-
     // STREAMING LOOP
     try {
+      let buffer = '';
+
       for await (const chunk of stream) {
-        console.log(`Mastermind: HTTPS chunk yielded (${chunk.length} bytes)`);
-        chunkCount++;
+        // console.log(`Mastermind: Chunk ${chunk.length} bytes`);
+        buffer += chunk;
 
-        // Handle SSE format "data: JSON\n\n"
-        const lines = (buffer + chunk).split('\n');
-        buffer = lines.pop() || ''; // Keep partial line
+        let boundary = buffer.indexOf('\n');
+        while (boundary !== -1) {
+          const line = buffer.substring(0, boundary).trim();
+          buffer = buffer.substring(boundary + 1);
+          boundary = buffer.indexOf('\n'); // Look for next
 
-        for (const line of lines) {
-          if (!line.trim() || line.startsWith(':')) continue; // skip comments/empty
+          if (!line || line.startsWith(':')) continue; // Skip Keep-Alive / Comments
+
           const jsonStr = line.replace(/^data:\s*/, '').trim();
           if (!jsonStr) continue;
 
@@ -677,29 +679,22 @@ Then provide your final answer.`;
                   if (part.text) {
                     // THINKING PARSER
                     let textPart = part.text;
-
-                    // Check for thinking block transitions
-                    // Simple regex split is not enough for streaming.
-                    // Logic: Scan textPart. If we hit ```thinking, switch state. If we hit ``` in thinking, switch back.
-
                     let remaining = textPart;
+
                     while (remaining.length > 0) {
                       if (!isThinking) {
                         const startIdx = remaining.indexOf('```thinking');
                         if (startIdx !== -1) {
-                          // Found start
                           accumulatedText += remaining.substring(0, startIdx);
-                          remaining = remaining.substring(startIdx + 11); // Skip marker
+                          remaining = remaining.substring(startIdx + 11);
                           isThinking = true;
                         } else {
                           accumulatedText += remaining;
                           remaining = '';
                         }
                       } else {
-                        // inside thinking
                         const endIdx = remaining.indexOf('```');
                         if (endIdx !== -1) {
-                          // Found end
                           accumulatedThinking += remaining.substring(0, endIdx);
                           remaining = remaining.substring(endIdx + 3);
                           isThinking = false;
@@ -710,7 +705,6 @@ Then provide your final answer.`;
                       }
                     }
 
-                    // Yield Update
                     yield {
                       text: accumulatedText,
                       isThinking: isThinking,
@@ -719,138 +713,115 @@ Then provide your final answer.`;
                     };
 
                   } else if (part.functionCall) {
-                    // Buffer function calls (they might span chunks? Vertex usually acts politely and sends full objects in SSE, but let's be safe and just push)
                     accumulatedFunctions.push(part.functionCall);
                   }
                 }
               }
             }
           } catch (e) {
-            console.error("JSON Parse Error in Stream", e);
+            // Partial JSON - ignore
           }
         }
-      }
-
-      // END OF STREAM ACTIONS
-      if (accumulatedFunctions.length > 0) {
-        // Execute Tools
-        const executedActions: ToolAction[] = [];
-
-        // Add model's thinking so far to history
-        // Add model's thinking so far to history
-        const modelParts: any[] = [];
-        if (accumulatedText && accumulatedText.trim()) {
-          modelParts.push({ text: accumulatedText });
-        }
-        // Add function calls as separate parts (Gemini can issue multiple calls)
-        for (const fc of accumulatedFunctions) {
-          modelParts.push({ functionCall: fc });
-        }
-
-        contents.push({
-          role: 'model',
-          parts: modelParts
-        });
-
-        const functionResponseParts: any[] = [];
-
-        for (const funcCall of accumulatedFunctions) {
-          const { name, args } = funcCall;
-          let result: any;
-
-          // EXECUTE TOOL (Copied logic)
-          yield { text: accumulatedText, thinkingText: accumulatedThinking, actions: [{ tool: name, input: args, status: 'pending' }] };
-
-          try {
-            console.log(`Mastermind: Executing tool ${name}`, args);
-
-            if (name === 'generate_image') {
-              new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
-              console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
-              const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
-              result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
-            } else if (name === 'list_files') {
-              result = await vaultService.listMarkdownFiles();
-            } else if (name === 'read_file') {
-              result = await vaultService.getFileContent(args.path);
-            } else if (name === 'search_content') {
-              result = await vaultService.searchVault(args.query);
-            } else if (name === 'create_note') {
-              await vaultService.createNote(args.path, args.content);
-              result = { status: 'success', message: `Note created at ${args.path}` };
-            } else if (name === 'create_folder') {
-              await vaultService.createFolder(args.path);
-              result = { status: 'success', message: `Folder created at ${args.path}` };
-            } else if (name === 'list_directory') {
-              result = await vaultService.listFolder(args.path);
-            } else if (name === 'move_file') {
-              await vaultService.moveFile(args.oldPath, args.newPath);
-              result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-            } else if (name === 'delete_file') {
-              await vaultService.deleteFile(args.path);
-              result = { status: 'success', message: `File deleted at ${args.path}` };
-            } else if (name === 'append_to_note') {
-              await vaultService.appendToNote(args.path, args.content);
-              result = { status: 'success', message: `Appended content to ${args.path}` };
-            } else if (name === 'prepend_to_note') {
-              await vaultService.prependToNote(args.path, args.content);
-              result = { status: 'success', message: `Prepended content to ${args.path}` };
-            } else if (name === 'update_section') {
-              await vaultService.updateNoteSection(args.path, args.header, args.content);
-              result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
-            } else if (name === 'get_tags') {
-              const tags = await vaultService.getTags();
-              result = { status: 'success', tags: tags };
-            } else if (name === 'get_links') {
-              const links = await vaultService.getLinks(args.path);
-              result = { status: 'success', links: links };
-            } else if (name === 'run_terminal_command') {
-              // Security Check
-              // @ts-ignore
-              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmDestructive) {
-                throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
-              }
-
-              try {
-                const { stdout, stderr } = await execAsync(args.command);
-                result = { status: 'success', stdout: stdout, stderr: stderr };
-              } catch (e: any) {
-                result = { status: 'error', message: e.message, stderr: e.stderr };
-              }
-            } else if (name === 'fetch_url') {
-              try {
-                const response = await requestUrl({ url: args.url });
-                // Limit size to avoid context overflow
-                const text = response.text.substring(0, 10000);
-                result = { status: 'success', content_snippet: text, full_length: response.text.length };
-              } catch (e: any) {
-                result = { status: 'error', message: e.message };
-              }
-            } else {
-              result = { status: 'error', message: `Unknown tool: ${name}` };
-            }
-
-          } catch (e: any) {
-            result = { status: 'error', message: e.message };
-          }
-
-          executedActions.push({ tool: name, input: args, output: result, status: result.status });
-          functionResponseParts.push({ functionResponse: { name, response: { content: result } } });
-        }
-
-        // RECURSIVE CALL with Tool Outputs
-        contents.push({ role: 'user', parts: functionResponseParts });
-
-        // Yield * chatInternal (Recursive)
-        // We need to pass the updated 'contents' as 'history' but carefully.
-        // Actually, to avoid infinite recursion complexity in this single step,
-        // I will just yield the final result for now or rely on the fact that existing flow expects text.
-        // Recursion:
-        yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking, recursionDepth + 1, signal);
       }
     } catch (e) {
       console.error("Mastermind: Streaming Loop Error", e);
       throw e;
+    }
+
+    // END OF STREAM ACTIONS (Recursion)
+    if (accumulatedFunctions.length > 0) {
+      const functionResponseParts: any[] = [];
+      const executedActions: ToolAction[] = [];
+
+      // Add model's thinking so far to history
+      const modelParts: any[] = [];
+      if (accumulatedText && accumulatedText.trim()) {
+        modelParts.push({ text: accumulatedText });
+      }
+      for (const fc of accumulatedFunctions) {
+        modelParts.push({ functionCall: fc });
+      }
+      contents.push({ role: 'model', parts: modelParts });
+
+      for (const funcCall of accumulatedFunctions) {
+        const { name, args } = funcCall;
+        let result: any;
+
+        // Yield pending status
+        yield { text: accumulatedText, thinkingText: accumulatedThinking, actions: [{ tool: name, input: args, status: 'pending' }] };
+
+        try {
+          if (name === 'generate_image') {
+            new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
+            const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
+            result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully.' };
+          } else if (name === 'list_files') {
+            result = await vaultService.listMarkdownFiles();
+          } else if (name === 'read_file') {
+            result = await vaultService.getFileContent(args.path);
+          } else if (name === 'search_content') {
+            result = await vaultService.searchVault(args.query);
+          } else if (name === 'create_note') {
+            await vaultService.createNote(args.path, args.content);
+            result = { status: 'success', message: `Note created at ${args.path}` };
+          } else if (name === 'create_folder') {
+            await vaultService.createFolder(args.path);
+            result = { status: 'success', message: `Folder created at ${args.path}` };
+          } else if (name === 'list_directory') {
+            result = await vaultService.listFolder(args.path);
+          } else if (name === 'move_file') {
+            await vaultService.moveFile(args.oldPath, args.newPath);
+            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+          } else if (name === 'delete_file') {
+            await vaultService.deleteFile(args.path);
+            result = { status: 'success', message: `File deleted at ${args.path}` };
+          } else if (name === 'append_to_note') {
+            await vaultService.appendToNote(args.path, args.content);
+            result = { status: 'success', message: `Appended content to ${args.path}` };
+          } else if (name === 'prepend_to_note') {
+            await vaultService.prependToNote(args.path, args.content);
+            result = { status: 'success', message: `Prepended content to ${args.path}` };
+          } else if (name === 'update_section') {
+            await vaultService.updateNoteSection(args.path, args.header, args.content);
+            result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
+          } else if (name === 'get_tags') {
+            const tags = await vaultService.getTags();
+            result = { status: 'success', tags: tags };
+          } else if (name === 'get_links') {
+            const links = await vaultService.getLinks(args.path);
+            result = { status: 'success', links: links };
+          } else if (name === 'run_terminal_command') {
+            // @ts-ignore
+            if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-mastermind').settings.confirmDestructive) {
+              throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled.");
+            }
+            try {
+              const { stdout, stderr } = await execAsync(args.command);
+              result = { status: 'success', stdout: stdout, stderr: stderr };
+            } catch (e: any) {
+              result = { status: 'error', message: e.message, stderr: e.stderr };
+            }
+          } else if (name === 'fetch_url') {
+            try {
+              const response = await requestUrl({ url: args.url });
+              const text = response.text.substring(0, 10000);
+              result = { status: 'success', content_snippet: text, full_length: response.text.length };
+            } catch (e: any) {
+              result = { status: 'error', message: e.message };
+            }
+          } else {
+            result = { status: 'error', message: `Unknown tool: ${name}` };
+          }
+        } catch (e: any) {
+          result = { status: 'error', message: e.message };
+        }
+
+        executedActions.push({ tool: name, input: args, output: result, status: result.status });
+        functionResponseParts.push({ functionResponse: { name, response: { content: result } } });
+      }
+
+      contents.push({ role: 'user', parts: functionResponseParts });
+      yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking, recursionDepth + 1, signal);
     }
   }
 
@@ -892,7 +863,7 @@ Then provide your final answer.`;
   }
 
   // Node.js HTTPS Streaming Helper
-  private async *streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
+  private async * streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
     const https = require('https');
     const { URL } = require('url');
     const url = new URL(urlStr);
