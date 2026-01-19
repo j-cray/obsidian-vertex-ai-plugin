@@ -584,7 +584,7 @@ Then provide your final answer.`;
         ]
       },
       {
-        googleSearchRetrieval: {}
+        googleSearch: {}
       }
     ];
 
