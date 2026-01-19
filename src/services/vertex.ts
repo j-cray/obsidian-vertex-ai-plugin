@@ -874,9 +874,18 @@ Then provide your final answer.`;
         return;
       }
       res.setEncoding('utf8');
-      res.on('data', (chunk: string) => queue.push(chunk));
-      res.on('end', () => queue.close());
-      res.on('error', (err: Error) => queue.fail(err));
+      res.on('data', (chunk: string) => {
+        console.log(`Mastermind: HTTPS chunk received (${chunk.length} bytes)`);
+        queue.push(chunk);
+      });
+      res.on('end', () => {
+        console.log('Mastermind: HTTPS stream ended');
+        queue.close();
+      });
+      res.on('error', (err: Error) => {
+        console.error('Mastermind: HTTPS stream error', err);
+        queue.fail(err);
+      });
     });
 
     req.on('error', (err: any) => queue.fail(err));

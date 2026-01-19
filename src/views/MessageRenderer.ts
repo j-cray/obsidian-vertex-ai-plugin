@@ -60,6 +60,7 @@ export class MessageRenderer {
     let currentThinking = '';
 
     const update = async (response: import('../types').ChatResponse) => {
+      // console.log('Mastermind: Renderer updating...', response);
       // 1. Tools
       if (response.actions && response.actions.length > 0) {
         toolContainer.empty(); // Simple re-render for now (could be optimized)

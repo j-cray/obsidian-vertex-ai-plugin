@@ -213,6 +213,7 @@ export class MastermindChatView extends ItemView {
       let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
 
       for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images)) {
+        console.log('Mastermind: View received chunk', chunk);
         await update(chunk);
         finalResponse = chunk;
       }
