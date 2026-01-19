@@ -598,22 +598,20 @@ Then provide your final answer.`;
       ]
     };
 
-    // --- FETCH STREAMING ---
-    console.log(`Mastermind: Starting fetch stream to ${url}`);
+    // --- NODE JS HTTPS STREAMING ---
+    console.log(`Mastermind: Starting stream request to ${url}`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-      body: JSON.stringify(body)
-    });
-
-    if (!response.ok || !response.body) {
-      const errText = await response.text();
-      throw new Error(`Vertex AI Streaming Error ${response.status}: ${errText}`);
+    let stream;
+    try {
+      stream = this.streamRequest(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      console.error("Mastermind: Failed to initiate stream", e);
+      throw e;
     }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
 
     let buffer = '';
     let accumulatedText = initialText;
@@ -624,15 +622,8 @@ Then provide your final answer.`;
 
     // STREAMING LOOP
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          console.log('Mastermind: Fetch stream done');
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        console.log(`Mastermind: Fetch chunk received (${chunk.length} bytes)`);
+      for await (const chunk of stream) {
+        console.log(`Mastermind: HTTPS chunk yielded (${chunk.length} bytes)`);
         chunkCount++;
 
         // Handle SSE format "data: JSON\n\n"
@@ -858,6 +849,48 @@ Then provide your final answer.`;
     throw new Error('No image data returned from Imagen.');
   }
 
+  // Node.js HTTPS Streaming Helper
+  private async *streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
+    const https = require('https');
+    const { URL } = require('url');
+    const url = new URL(urlStr);
+    const reqOptions = {
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname + url.search,
+      method: options.method,
+      headers: options.headers
+    };
+
+    const queue = new AsyncQueue<string>();
+
+    const req = https.request(reqOptions, (res: any) => {
+      if (res.statusCode && res.statusCode >= 300) {
+        queue.fail(new Error(`HTTP Error ${res.statusCode}`));
+        return;
+      }
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        console.log(`Mastermind: HTTPS chunk received (${chunk.length} bytes)`);
+        queue.push(chunk);
+      });
+      res.on('end', () => {
+        console.log('Mastermind: HTTPS stream ended');
+        queue.close();
+      });
+      res.on('error', (err: Error) => {
+        console.error('Mastermind: HTTPS stream error', err);
+        queue.fail(err);
+      });
+    });
+
+    req.on('error', (err: any) => queue.fail(err));
+    req.write(options.body);
+    req.end();
+
+    yield* queue;
+  }
+
   // Helper method to validate JSON
   validateJSON(json: string): boolean {
     try {
@@ -868,4 +901,63 @@ Then provide your final answer.`;
     }
   }
   // End of class
+}
+
+// Simple Async Queue for buffering stream events
+class AsyncQueue<T> {
+  private queue: T[] = [];
+  private resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+  private rejectNext: ((reason?: any) => void) | null = null;
+  private closed = false;
+  private error: Error | null = null;
+
+  push(value: T) {
+    if (this.closed) return;
+    if (this.resolveNext) {
+      const resolve = this.resolveNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      resolve({ value, done: false });
+    } else {
+      this.queue.push(value);
+    }
+  }
+
+  close() {
+    this.closed = true;
+    if (this.resolveNext) {
+      const resolve = this.resolveNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      resolve({ value: undefined as any, done: true });
+    }
+  }
+
+  fail(err: Error) {
+    this.error = err;
+    if (this.rejectNext) {
+      const reject = this.rejectNext;
+      this.resolveNext = null;
+      this.rejectNext = null;
+      reject(err);
+    }
+  }
+
+  [Symbol.asyncIterator]() {
+    return {
+      next: () => {
+        if (this.error) return Promise.reject(this.error);
+        if (this.queue.length > 0) {
+          return Promise.resolve({ value: this.queue.shift()!, done: false });
+        }
+        if (this.closed) {
+          return Promise.resolve({ value: undefined as any, done: true });
+        }
+        return new Promise<IteratorResult<T>>((resolve, reject) => {
+          this.resolveNext = resolve;
+          this.rejectNext = reject;
+        });
+      }
+    };
+  }
 }
