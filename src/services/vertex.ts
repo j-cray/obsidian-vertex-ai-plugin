@@ -544,6 +544,57 @@ Then provide your final answer.`;
               },
               required: ['oldPath', 'newPath']
             }
+          },
+          {
+            name: 'append_to_note',
+            description: 'Appends content to the end of a note.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string' },
+                content: { type: 'string' }
+              },
+              required: ['path', 'content']
+            }
+          },
+          {
+            name: 'prepend_to_note',
+            description: 'Prepends content to the start of a note (after frontmatter if present).',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string' },
+                content: { type: 'string' }
+              },
+              required: ['path', 'content']
+            }
+          },
+          {
+            name: 'update_section',
+            description: 'Updates a specific section of a note under a given header.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string' },
+                header: { type: 'string', description: 'The exact header text (without #)' },
+                content: { type: 'string', description: 'The new content for the section' }
+              },
+              required: ['path', 'header', 'content']
+            }
+          },
+          {
+            name: 'get_tags',
+            description: 'Gets all unique tags in the vault.',
+            parameters: { type: 'object', properties: {} }
+          },
+          {
+            name: 'get_links',
+            description: 'Gets all outgoing links from a specific note.',
+            parameters: {
+              type: 'object',
+              properties: { path: { type: 'string' } },
+              required: ['path']
+            }
           }
         ]
       }
@@ -651,6 +702,21 @@ Then provide your final answer.`;
             } else if (name === 'delete_file') {
               await vaultService.deleteFile(args.path);
               result = { status: 'success', message: `File deleted at ${args.path}` };
+            } else if (name === 'append_to_note') {
+              await vaultService.appendToNote(args.path, args.content);
+              result = { status: 'success', message: `Appended content to ${args.path}` };
+            } else if (name === 'prepend_to_note') {
+              await vaultService.prependToNote(args.path, args.content);
+              result = { status: 'success', message: `Prepended content to ${args.path}` };
+            } else if (name === 'update_section') {
+              await vaultService.updateNoteSection(args.path, args.header, args.content);
+              result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
+            } else if (name === 'get_tags') {
+              const tags = await vaultService.getTags();
+              result = { status: 'success', tags: tags };
+            } else if (name === 'get_links') {
+              const links = await vaultService.getLinks(args.path);
+              result = { status: 'success', links: links };
             }
           } catch (err: any) {
             console.error(`Mastermind: Tool ${name} error`, err);

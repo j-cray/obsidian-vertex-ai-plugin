@@ -1,4 +1,4 @@
-import { App, TFile, requestUrl } from 'obsidian';
+import { App, TFile, requestUrl, getAllTags } from 'obsidian';
 
 export class VaultService {
   app: App;
@@ -316,6 +316,102 @@ export class VaultService {
     return processedText;
   }
 
+  async appendToNote(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.process(file, (data) => {
+        return data + ((data.endsWith('\n') ? '' : '\n') + content);
+      });
+    } else {
+      throw new Error(`File not found: ${path}`);
+    }
+  }
+
+  async prependToNote(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.process(file, (data) => {
+        // Check for frontmatter
+        const frontmatterRegex = /^---\n[\s\S]*?\n---\n/;
+        const match = data.match(frontmatterRegex);
+        if (match) {
+          // Insert after frontmatter
+          return data.slice(0, match[0].length) + content + '\n' + data.slice(match[0].length);
+        } else {
+          // Insert at start
+          return content + '\n' + data;
+        }
+      });
+    } else {
+      throw new Error(`File not found: ${path}`);
+    }
+  }
+
+  async updateNoteSection(path: string, header: string, newContent: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache || !cache.headings) throw new Error(`No metadata/headings found for ${path}`);
+
+    const targetHeading = cache.headings.find(h => h.heading === header);
+    if (!targetHeading) throw new Error(`Heading "${header}" not found in ${path}`);
+
+    const headings = cache.headings;
+    const targetIndex = headings.indexOf(targetHeading);
+
+    // Find the end of the section
+    // The section ends at the start of the next heading of same or higher level (lower level value)
+    let endLine = -1;
+    for (let i = targetIndex + 1; i < headings.length; i++) {
+      if (headings[i].level <= targetHeading.level) {
+        endLine = headings[i].position.start.line;
+        break;
+      }
+    }
+
+    const content = await this.app.vault.read(file);
+    const lines = content.split('\n');
+
+    const startLine = targetHeading.position.end.line + 1;
+    const actualEndLine = endLine === -1 ? lines.length : endLine;
+
+    // Replace lines
+    const newLines = [
+      ...lines.slice(0, startLine),
+      newContent,
+      ...lines.slice(actualEndLine)
+    ];
+
+    await this.app.vault.modify(file, newLines.join('\n'));
+  }
+
+  async getTags(): Promise<string[]> {
+    const tags = new Set<string>();
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache) {
+        const fileTags = getAllTags(cache);
+        if (fileTags) {
+          fileTags.forEach(t => tags.add(t));
+        }
+      }
+    }
+    return Array.from(tags).sort();
+  }
+
+  async getLinks(path: string): Promise<string[]> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache || !cache.links) return [];
+
+    return cache.links.map(l => l.link);
+  }
+
+  // Helper for internal use if needed
   private escapeRegExp(string: string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
