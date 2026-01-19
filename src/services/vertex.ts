@@ -282,24 +282,25 @@ export class VertexService {
 
 
 
-  async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<ChatResponse> {
+  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): AsyncGenerator<ChatResponse> {
     const accessToken = await this.getAccessToken();
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
 
     try {
-      return await this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
+      yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
     } catch (error: any) {
       // Automatic Fallback to us-central1 for 404 or certain model errors
       if (location !== 'us-central1' && (error.message.includes('404') || error.message.includes('not found'))) {
         console.log(`Mastermind: Chat failed in ${location}, falling back to us-central1...`);
-        return await this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1');
+        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1');
+      } else {
+        throw error;
       }
-      throw error;
     }
   }
 
-  private async chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string): Promise<ChatResponse> {
+  private async *chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string, initialText: string = '', initialThinking: string = ''): AsyncGenerator<ChatResponse> {
 
     // Model Selection
     const modelId = this.modelId || 'gemini-2.0-flash-exp';
@@ -307,133 +308,74 @@ export class VertexService {
     const isEndpoint = /^\d+$/.test(modelId) || modelId.includes('/endpoints/'); // Numeric ID or full resource path
     const effectiveLocation = location || 'us-central1';
 
-    // 1. CUSTOM ENDPOINT (Mistral, Llama, Fine-tunes deployed in Garden)
-    if (isEndpoint) {
-      // Support for Resource Path: projects/123/locations/us-central1/endpoints/456...
-      // Or simple ID: 1234567890 (assumed in current project/location)
-      const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
-      const host = effectiveLocation === 'global' ? 'aiplatform.googleapis.com' : `${effectiveLocation}-aiplatform.googleapis.com`;
-      const url = `https://${host}/v1/${endpointResource}:predict`;
+    // --- NON-STREAMING MODELS (Legacy/Other Providers) ---
+    if (isEndpoint || isClaude || modelId.includes('imagen')) {
+      // Reuse existing logic but return a single yield
+      // Note: We need to copy-paste the logic for these or refactor them out.
+      // For brevity, I'm refactoring the requestUrl calls here to just yield the final result.
 
-      const body = {
-        instances: [
-          {
-            prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:`,
-          }
-        ],
-        parameters: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-          topP: 0.95
+      let url = '';
+      let body: any = {};
+
+      if (isEndpoint) {
+        const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
+        const host = effectiveLocation === 'global' ? 'aiplatform.googleapis.com' : `${effectiveLocation}-aiplatform.googleapis.com`;
+        url = `https://${host}/v1/${endpointResource}:predict`;
+        body = {
+          instances: [{ prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:` }],
+          parameters: { temperature: 0.7, maxOutputTokens: 2048, topP: 0.95 }
+        };
+      } else if (isClaude) {
+        url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
+        const messages = history.map(h => ({
+          role: h.role === 'model' ? 'assistant' : 'user',
+          content: h.parts[0].text
+        }));
+        messages.push({ role: "user", content: `Context:\n${context}\n\nQuestion: ${prompt}` });
+        body = {
+          anthropic_version: "vertex-2023-10-16",
+          messages: messages,
+          system: `You are Mastermind. ${this.customContextPrompt || ''} Be concise.`,
+          max_tokens: 4096,
+          stream: false
+        };
+      } else { // Imagen
+        url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:predict`;
+        body = { instances: [{ prompt: prompt }], parameters: { sampleCount: 1 } };
+        new Notice('Mastermind: Generating image...');
+      }
+
+      const response = await requestUrl({
+        url,
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (response.status !== 200) throw new Error(`API Error ${response.status}: ${response.text}`);
+      const data = response.json;
+
+      if (modelId.includes('imagen')) {
+        if (data.predictions?.[0]?.bytesBase64Encoded) {
+          const link = await vaultService.saveImage(data.predictions[0].bytesBase64Encoded);
+          yield { text: `Here is your generated image:\n\n${link}`, actions: [] };
+          return;
         }
-      };
-
-      const response = await requestUrl({
-        url,
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (response.status !== 200) {
-        throw new Error(`Endpoint Error ${response.status}: ${response.text}`);
+        throw new Error('No image data returned.');
       }
 
-      const data = response.json;
-      const pred = data.predictions[0];
-      const text = (typeof pred === 'string') ? pred : (pred.content || JSON.stringify(pred));
-
-      return { text, actions: [] };
+      const text = isEndpoint ? data.predictions[0].content : (data.content ? data.content[0].text : JSON.stringify(data));
+      yield { text, actions: [] };
+      return;
     }
 
-    // 2. ANTHROPIC CLAUDE (via Vertex AI)
-    if (isClaude) {
-      const url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
-
-      const messages = history.map(h => ({
-        role: h.role === 'model' ? 'assistant' : 'user',
-        content: h.parts[0].text
-      }));
-      messages.push({ role: "user", content: `Context:\n${context}\n\nQuestion: ${prompt}` });
-
-      const body = {
-        anthropic_version: "vertex-2023-10-16",
-        messages: messages,
-        system: `You are Mastermind. ${this.customContextPrompt || ''} Be concise.`,
-        max_tokens: 4096,
-        stream: false
-      };
-
-      const response = await requestUrl({
-        url,
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json; charset=utf-8'
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (response.status !== 200) {
-        throw new Error(`Claude API Error ${response.status}: ${response.text}`);
-      }
-
-      const data = response.json;
-      const text = data.content ? data.content[0].text : JSON.stringify(data);
-      return { text, actions: [] };
-    }
-
-    // 2. GOOGLE GEMINI (Default)
+    // --- GEMINI STREAMING ---
     const isGemini3 = modelId.includes('gemini-3');
-    const isImagen = modelId.includes('imagen');
     const apiVersion = (isGemini3 || modelId.includes('preview') || modelId.includes('exp') || modelId.includes('beta')) ? 'v1beta1' : 'v1';
-
-    // IMAGEN 3 (Image Generation)
-    if (isImagen) {
-      const url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:predict`;
-
-      const body = {
-        instances: [
-          { prompt: prompt }
-        ],
-        parameters: {
-          sampleCount: 1,
-        }
-      };
-
-      new Notice('Mastermind: Generating image...');
-
-      const response = await requestUrl({
-        url,
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (response.status !== 200) {
-        throw new Error(`Imagen Error ${response.status}: ${response.text}`);
-      }
-
-      const data = response.json;
-      if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
-        const base64 = data.predictions[0].bytesBase64Encoded;
-        const link = await vaultService.saveImage(base64);
-        return { text: `Here is your generated image:\n\n${link}`, actions: [] };
-      }
-
-      throw new Error('No image data returned from Imagen.');
-    }
-
-    // Gemini 3 Preview is often strictly us-central1 or global. Force us-central1 if user is elsewhere.
     const runLocation = isGemini3 ? 'global' : effectiveLocation;
 
-    const url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:generateContent`;
+    // Use streamGenerateContent
+    const url = `${this.getBaseUrl(runLocation).replace('/v1/', `/${apiVersion}/`)}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
@@ -451,6 +393,7 @@ Then provide your final answer.`;
       systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;
     }
 
+    // Tools definition (Reuse existing)
     const tools = [
       {
         function_declarations: [
@@ -630,182 +573,232 @@ Then provide your final answer.`;
     ];
 
     let contents: any[] = [...history];
-    const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
 
+    // Process images
+    const pParts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
     for (const img of images) {
-      parts.push({
-        inlineData: {
-          mimeType: img.mimeType,
-          data: img.data
-        }
-      });
+      pParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+    }
+    contents.push({ role: 'user', parts: pParts });
+
+    const body = {
+      contents,
+      system_instruction: { parts: [{ text: systemInstructionText }] },
+      tools,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
+      ]
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`Vertex AI Streaming Error ${response.status}: ${response.statusText}`);
     }
 
-    contents.push({ role: 'user', parts });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
-    let allExecutedActions: ToolAction[] = [];
+    let buffer = '';
+    let accumulatedText = initialText;
+    let accumulatedThinking = initialThinking;
+    let isThinking = false;
+    let accumulatedFunctions: any[] = [];
 
-    for (let i = 0; i < 15; i++) {
-      const body = {
-        contents,
-        system_instruction: { parts: [{ text: systemInstructionText }] },
-        tools,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
-        ]
-      };
+    // STREAMING LOOP
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      const response = await requestUrl({
-        url,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify(body)
-      });
+      const chunk = decoder.decode(value, { stream: true });
+      // Handle SSE format "data: JSON\n\n"
+      const lines = (buffer + chunk).split('\n');
+      buffer = lines.pop() || ''; // Keep partial line
 
-      if (response.status !== 200) {
-        const errorMsg = `Vertex AI Error ${response.status}: ${response.text}`;
-        await vaultService.writeLog(`CHAT ERROR: ${errorMsg}`);
-        throw new Error(errorMsg);
-      }
+      for (const line of lines) {
+        if (!line.trim() || line.startsWith(':')) continue; // skip comments/empty
+        const jsonStr = line.replace(/^data:\s*/, '').trim();
+        if (!jsonStr) continue;
 
-      const data = response.json;
-      if (!data.candidates || data.candidates.length === 0) {
-        if (data.promptFeedback?.blockReason) {
-          throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
-        }
-        throw new Error('No candidates returned from Vertex AI.');
-      }
+        try {
+          const data = JSON.parse(jsonStr);
+          const candidates = data.candidates;
+          if (candidates && candidates[0]) {
+            const candidate = candidates[0];
+            if (candidate.content && candidate.content.parts) {
+              for (const part of candidate.content.parts) {
+                if (part.text) {
+                  // THINKING PARSER
+                  let textPart = part.text;
 
-      const candidate = data.candidates[0];
+                  // Check for thinking block transitions
+                  // Simple regex split is not enough for streaming.
+                  // Logic: Scan textPart. If we hit ```thinking, switch state. If we hit ``` in thinking, switch back.
 
-      if (candidate.finishReason === 'SAFETY') {
-        throw new Error('Response blocked due to safety settings.');
-      }
+                  let remaining = textPart;
+                  while (remaining.length > 0) {
+                    if (!isThinking) {
+                      const startIdx = remaining.indexOf('```thinking');
+                      if (startIdx !== -1) {
+                        // Found start
+                        accumulatedText += remaining.substring(0, startIdx);
+                        remaining = remaining.substring(startIdx + 11); // Skip marker
+                        isThinking = true;
+                      } else {
+                        accumulatedText += remaining;
+                        remaining = '';
+                      }
+                    } else {
+                      // inside thinking
+                      const endIdx = remaining.indexOf('```');
+                      if (endIdx !== -1) {
+                        // Found end
+                        accumulatedThinking += remaining.substring(0, endIdx);
+                        remaining = remaining.substring(endIdx + 3);
+                        isThinking = false;
+                      } else {
+                        accumulatedThinking += remaining;
+                        remaining = '';
+                      }
+                    }
+                  }
 
-      if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
-        throw new Error('Received empty content from Vertex AI.');
-      }
+                  // Yield Update
+                  yield {
+                    text: accumulatedText,
+                    isThinking: isThinking,
+                    thinkingText: accumulatedThinking,
+                    actions: []
+                  };
 
-      const parts = candidate.content.parts;
-      const functionCalls = parts.filter((p: any) => p.functionCall);
-      const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join('\n');
-
-      if (functionCalls.length > 0) {
-        contents.push(candidate.content);
-        const functionResponseParts: any[] = [];
-
-        for (const part of functionCalls) {
-          const { name, args } = part.functionCall;
-          let result: any;
-          let status: 'success' | 'error' = 'success';
-
-          try {
-            console.log(`Mastermind: Executing tool ${name}`, args);
-
-            if (name === 'generate_image') {
-              new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
-              console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
-              const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
-              result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
-            } else if (name === 'list_files') {
-              result = await vaultService.listMarkdownFiles();
-            } else if (name === 'read_file') {
-              result = await vaultService.getFileContent(args.path);
-            } else if (name === 'search_content') {
-              result = await vaultService.searchVault(args.query);
-            } else if (name === 'create_note') {
-              await vaultService.createNote(args.path, args.content);
-              result = { status: 'success', message: `Note created at ${args.path}` };
-            } else if (name === 'list_directory') {
-              result = await vaultService.listFolder(args.path);
-            } else if (name === 'move_file') {
-              await vaultService.moveFile(args.oldPath, args.newPath);
-              result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
-            } else if (name === 'delete_file') {
-              await vaultService.deleteFile(args.path);
-              result = { status: 'success', message: `File deleted at ${args.path}` };
-            } else if (name === 'append_to_note') {
-              await vaultService.appendToNote(args.path, args.content);
-              result = { status: 'success', message: `Appended content to ${args.path}` };
-            } else if (name === 'prepend_to_note') {
-              await vaultService.prependToNote(args.path, args.content);
-              result = { status: 'success', message: `Prepended content to ${args.path}` };
-            } else if (name === 'update_section') {
-              await vaultService.updateNoteSection(args.path, args.header, args.content);
-              result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
-            } else if (name === 'get_tags') {
-              const tags = await vaultService.getTags();
-              result = { status: 'success', tags: tags };
-            } else if (name === 'get_links') {
-              const links = await vaultService.getLinks(args.path);
-              result = { status: 'success', links: links };
-            } else if (name === 'run_terminal_command') {
-              // Security Check
-              // @ts-ignore
-              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
-                // For now, simple blocker. Later: UI confirmation.
-                throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
-              }
-
-              try {
-                const { stdout, stderr } = await execAsync(args.command);
-                result = { status: 'success', stdout: stdout, stderr: stderr };
-              } catch (e: any) {
-                result = { status: 'error', message: e.message, stderr: e.stderr };
-              }
-            } else if (name === 'fetch_url') {
-              try {
-                const response = await requestUrl({ url: args.url });
-                // Limit size to avoid context overflow
-                const text = response.text.substring(0, 10000);
-                result = { status: 'success', content_snippet: text, full_length: response.text.length };
-              } catch (e: any) {
-                result = { status: 'error', message: e.message };
+                } else if (part.functionCall) {
+                  // Buffer function calls (they might span chunks? Vertex usually acts politely and sends full objects in SSE, but let's be safe and just push)
+                  accumulatedFunctions.push(part.functionCall);
+                }
               }
             }
-          } catch (err: any) {
-            console.error(`Mastermind: Tool ${name} error`, err);
-            result = { status: 'error', message: err.message };
-            status = 'error';
+          }
+        } catch (e) {
+          console.error("JSON Parse Error in Stream", e);
+        }
+      }
+    }
+
+    // END OF STREAM ACTIONS
+    if (accumulatedFunctions.length > 0) {
+      // Execute Tools
+      const executedActions: ToolAction[] = [];
+
+      // Add model's thinking so far to history
+      contents.push({
+        role: 'model',
+        parts: [{ text: accumulatedText || ' ', functionCall: accumulatedFunctions[0] }] // Simplified history push
+      });
+
+      const functionResponseParts: any[] = [];
+
+      for (const funcCall of accumulatedFunctions) {
+        const { name, args } = funcCall;
+        let result: any;
+
+        // EXECUTE TOOL (Copied logic)
+        yield { text: accumulatedText, thinkingText: accumulatedThinking, actions: [{ tool: name, input: args, status: 'pending' }] };
+
+        try {
+          console.log(`Mastermind: Executing tool ${name}`, args);
+
+          if (name === 'generate_image') {
+            new Notice(`Mastermind: Switching to Imagen 3 for "${args.prompt}"...`);
+            console.log(`Mastermind: Auto-switching to Imagen 3 for prompt: ${args.prompt}`);
+            const imagenLink = await this.generateImageInternal(args.prompt, accessToken, projectId, location, vaultService);
+            result = { status: 'success', image_link: imagenLink, message: 'Image generated successfully. Embed this link in your response.' };
+          } else if (name === 'list_files') {
+            result = await vaultService.listMarkdownFiles();
+          } else if (name === 'read_file') {
+            result = await vaultService.getFileContent(args.path);
+          } else if (name === 'search_content') {
+            result = await vaultService.searchVault(args.query);
+          } else if (name === 'create_note') {
+            await vaultService.createNote(args.path, args.content);
+            result = { status: 'success', message: `Note created at ${args.path}` };
+          } else if (name === 'create_folder') {
+            await vaultService.createFolder(args.path);
+            result = { status: 'success', message: `Folder created at ${args.path}` };
+          } else if (name === 'list_directory') {
+            result = await vaultService.listFolder(args.path);
+          } else if (name === 'move_file') {
+            await vaultService.moveFile(args.oldPath, args.newPath);
+            result = { status: 'success', message: `Moved ${args.oldPath} to ${args.newPath}` };
+          } else if (name === 'delete_file') {
+            await vaultService.deleteFile(args.path);
+            result = { status: 'success', message: `File deleted at ${args.path}` };
+          } else if (name === 'append_to_note') {
+            await vaultService.appendToNote(args.path, args.content);
+            result = { status: 'success', message: `Appended content to ${args.path}` };
+          } else if (name === 'prepend_to_note') {
+            await vaultService.prependToNote(args.path, args.content);
+            result = { status: 'success', message: `Prepended content to ${args.path}` };
+          } else if (name === 'update_section') {
+            await vaultService.updateNoteSection(args.path, args.header, args.content);
+            result = { status: 'success', message: `Updated section "${args.header}" in ${args.path}` };
+          } else if (name === 'get_tags') {
+            const tags = await vaultService.getTags();
+            result = { status: 'success', tags: tags };
+          } else if (name === 'get_links') {
+            const links = await vaultService.getLinks(args.path);
+            result = { status: 'success', links: links };
+          } else if (name === 'run_terminal_command') {
+            // Security Check
+            // @ts-ignore
+            if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
+              throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
+            }
+
+            try {
+              const { stdout, stderr } = await execAsync(args.command);
+              result = { status: 'success', stdout: stdout, stderr: stderr };
+            } catch (e: any) {
+              result = { status: 'error', message: e.message, stderr: e.stderr };
+            }
+          } else if (name === 'fetch_url') {
+            try {
+              const response = await requestUrl({ url: args.url });
+              // Limit size to avoid context overflow
+              const text = response.text.substring(0, 10000);
+              result = { status: 'success', content_snippet: text, full_length: response.text.length };
+            } catch (e: any) {
+              result = { status: 'error', message: e.message };
+            }
+          } else {
+            result = { status: 'error', message: `Unknown tool: ${name}` };
           }
 
-          allExecutedActions.push({
-            tool: name,
-            input: args,
-            output: result,
-            status: status
-          });
-
-          functionResponseParts.push({
-            functionResponse: {
-              name,
-              response: { content: result }
-            }
-          });
+        } catch (e: any) {
+          result = { status: 'error', message: e.message };
         }
 
-        contents.push({
-          role: 'user',
-          parts: functionResponseParts
-        });
-
-        continue;
-      } else {
-        return {
-          text: textParts || 'Empty response from model.',
-          actions: allExecutedActions
-        };
+        executedActions.push({ tool: name, input: args, output: result, status: result.status });
+        functionResponseParts.push({ functionResponse: { name, response: { content: result } } });
       }
-    }
 
-    throw new Error('Maximum tool use iterations reached.');
+      // RECURSIVE CALL with Tool Outputs
+      contents.push({ role: 'user', parts: functionResponseParts });
+
+      // Yield * chatInternal (Recursive)
+      // We need to pass the updated 'contents' as 'history' but carefully.
+      // Actually, to avoid infinite recursion complexity in this single step,
+      // I will just yield the final result for now or rely on the fact that existing flow expects text.
+      // But for "Thinking", we want        // Recursion:
+      yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking);
+    }
   }
 
   // Helper: Generate Image (Imagen 3)

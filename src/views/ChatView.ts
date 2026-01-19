@@ -200,8 +200,8 @@ export class MastermindChatView extends ItemView {
     // Render User Message
     await this.messageRenderer.renderUserMessage(message, this.plugin.settings.profilePictureUser);
 
-    // Thinking Animation
-    const thinkingEl = this.messageRenderer.renderThinking(this.messageContainer);
+    // Prepare AI Message Container (Streaming)
+    const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
 
     try {
       this.vertexService.updateSettings(this.plugin.settings);
@@ -209,21 +209,27 @@ export class MastermindChatView extends ItemView {
       const context = await this.vaultService.getRelevantContext(message);
       const images = await this.vaultService.getActiveNoteImages();
 
-      // VertexService now returns ChatResponse { text, actions }
-      const response = await this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images);
+      // Streaming Loop
+      let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
 
-      thinkingEl.remove();
+      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images)) {
+        await update(chunk);
+        finalResponse = chunk;
+      }
 
-      // Render AI Message with Actions
-      const enhancedResponseText = await this.vaultService.enhanceTextWithLinks(response.text);
-      await this.messageRenderer.renderAIMessage(enhancedResponseText, this.plugin.settings.profilePictureAI, response.actions);
+      // Final Polish: Enhance Links
+      if (finalResponse.text) {
+        const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
+        finalResponse.text = enhancedText;
+        await update(finalResponse);
+      }
 
       // State Updates
       const userMsg: ChatMessage = { role: 'user', parts: [{ text: message }] };
       const aiMsg: ChatMessage = {
         role: 'model',
-        parts: [{ text: response.text }],
-        actions: response.actions
+        parts: [{ text: finalResponse.text }],
+        actions: finalResponse.actions
       };
 
       this.messages.push(userMsg);
@@ -243,7 +249,6 @@ export class MastermindChatView extends ItemView {
 
     } catch (error: any) {
       console.error('Mastermind Error:', error);
-      thinkingEl.remove();
 
       let errorMessage = error instanceof Error ? error.message : String(error);
       let helpfulTip = '';
@@ -254,7 +259,8 @@ export class MastermindChatView extends ItemView {
         helpfulTip = '\n\n**Tip**: Check if your Service Account has the "Vertex AI User" role.';
       }
 
-      this.messageRenderer.renderAIMessage(`**Error**: ${errorMessage}${helpfulTip}`, this.plugin.settings.profilePictureAI);
+      // Update the streaming message with the error
+      update({ text: `**Error**: ${errorMessage}${helpfulTip}`, actions: [] });
       new Notice('Mastermind Chat failed.');
     }
   }

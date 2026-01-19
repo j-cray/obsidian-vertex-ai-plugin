@@ -45,7 +45,64 @@ export class MessageRenderer {
     return contentContainer;
   }
 
+  startAIMessage(avatarUrl: string) {
+    const msgBlock = this.container.createDiv('chat-message-block message-block-ai');
+    const avatar = msgBlock.createEl('img', { cls: 'chat-avatar', attr: { src: avatarUrl } });
+    const contentContainer = msgBlock.createDiv('chat-message-content message-ai');
+
+    // State Containers
+    const toolContainer = contentContainer.createDiv('chat-tool-actions');
+    const thinkingContainer = contentContainer.createDiv('thinking-container');
+    thinkingContainer.style.display = 'none'; // Hide initially
+    const textContainer = contentContainer.createDiv('chat-text-content');
+
+    let currentText = '';
+    let currentThinking = '';
+
+    const update = async (response: import('../types').ChatResponse) => {
+      // 1. Tools
+      if (response.actions && response.actions.length > 0) {
+        toolContainer.empty(); // Simple re-render for now (could be optimized)
+        await this.renderToolActions(toolContainer, response.actions);
+      }
+
+      // 2. Thinking
+      if (response.isThinking || response.thinkingText) {
+        thinkingContainer.style.display = 'block';
+        if (!thinkingContainer.querySelector('.thinking-header')) {
+          const header = thinkingContainer.createDiv('thinking-header');
+          setIcon(header.createSpan('thinking-icon'), 'brain-circuit');
+          header.createSpan().innerText = 'Thinking Process';
+        }
+
+        let contentEl = thinkingContainer.querySelector('.thinking-content') as HTMLElement;
+        if (!contentEl) contentEl = thinkingContainer.createDiv('thinking-content');
+
+        // Only update if changed to avoid cursor jumping if we were editable (we aren't)
+        if (response.thinkingText !== currentThinking) {
+          contentEl.innerText = response.thinkingText || '';
+          currentThinking = response.thinkingText || '';
+        }
+      }
+
+      // 3. Text
+      if (response.text && response.text !== currentText) {
+        textContainer.empty();
+        const component = new Component();
+        component.load();
+        await MarkdownRenderer.render(this.app, response.text, textContainer, '', component);
+        currentText = response.text;
+      }
+
+      this.scrollBottom();
+    };
+
+    return { container: contentContainer, update };
+  }
+
   async renderToolActions(container: HTMLElement, actions: ToolAction[]) {
+    // Ensure container exists (it might be passed from update loop)
+    if (!container) return;
     const actionContainer = container.createDiv('chat-tool-actions');
 
     for (const action of actions) {
