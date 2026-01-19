@@ -291,8 +291,8 @@
     right: 14px;
     top: 50%;
     transform: translateY(-50%);
-    background: transparent;
-    border: none;
+    background: transparent !important;
+    border: none !important;
     width: 32px;
     height: 32px;
     cursor: pointer;
@@ -302,15 +302,20 @@
     color: var(--accent-color);
     padding: 0;
     z-index: 5;
-    box-shadow: none;
-    /* Ensure no shadow/bg */
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-appearance: none;
 }
 
-.chat-send-button:hover {
+.chat-send-button:hover,
+.chat-send-button:focus,
+.chat-send-button:active {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
     transform: translateY(-50%) scale(1.1);
-    /* Keep vertical centering on hover */
     color: var(--text-normal);
-    background: transparent;
+    outline: none !important;
 }
 
 .chat-send-button svg {
