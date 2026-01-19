@@ -6,28 +6,49 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 export class VertexService {
+  private authProvider!: 'vertex' | 'aistudio';
   private serviceAccountJson!: string;
+  private aiStudioKey!: string;
   private location!: string;
   private modelId!: string;
   private maxOutputTokens: number = 8192;
   private temperature: number = 0.7;
   private customContextPrompt: string = '';
+  // Permissions
+  private permVaultRead: boolean = true;
+  private permVaultWrite: boolean = true;
+  private permVaultDelete: boolean = false;
+  private permWeb: boolean = true;
+  private permTerminal: boolean = false;
+  private confirmVaultDestructive: boolean = true;
+  private confirmTerminalDestructive: boolean = true;
+  // Token management (Vertex AI only)
   private accessToken: string | null = null;
   private tokenExpiry: number = 0;
   private isRefreshingToken: boolean = false;
   private tokenRefreshPromise: Promise<string> | null = null;
 
-  constructor(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string, maxOutputTokens: number, temperature: number }) {
+  constructor(settings: any) {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string, maxOutputTokens: number, temperature: number }) {
+  updateSettings(settings: any) {
+    this.authProvider = settings.authProvider ?? 'vertex';
     this.serviceAccountJson = settings.serviceAccountJson;
+    this.aiStudioKey = settings.aiStudioKey ?? '';
     this.location = settings.location;
     this.modelId = settings.modelId;
     this.customContextPrompt = settings.customContextPrompt;
     this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
     this.temperature = settings.temperature ?? 0.7;
+    // Permissions
+    this.permVaultRead = settings.permVaultRead ?? true;
+    this.permVaultWrite = settings.permVaultWrite ?? true;
+    this.permVaultDelete = settings.permVaultDelete ?? false;
+    this.permWeb = settings.permWeb ?? true;
+    this.permTerminal = settings.permTerminal ?? false;
+    this.confirmVaultDestructive = settings.confirmVaultDestructive ?? true;
+    this.confirmTerminalDestructive = settings.confirmTerminalDestructive ?? true;
     this.accessToken = null; // Reset token on settings change
   }
 
