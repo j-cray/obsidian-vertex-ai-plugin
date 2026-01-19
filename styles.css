@@ -115,7 +115,8 @@
     flex-shrink: 0;
 }
 
-.chat-message {
+.chat-message,
+.chat-message-content {
     padding: 14px 18px;
     border-radius: 16px;
     max-width: 85%;
@@ -130,6 +131,37 @@
     transition: transform 0.2s ease;
     overflow-wrap: break-word;
     word-break: break-word;
+}
+
+/* Thinking Process Styles */
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+.thinking-icon {
+    display: flex;
+    align-items: center;
+}
+
+.thinking-content {
+    font-size: 13px;
+    color: var(--text-faint);
+    border-left: 2px solid var(--interactive-accent);
+    padding-left: 12px;
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+    font-style: italic;
+    background: rgba(var(--mono-rgb-100), 0.02);
+    border-radius: 0 4px 4px 0;
+    padding-top: 4px;
+    padding-bottom: 4px;
 }
 
 .chat-message pre,
