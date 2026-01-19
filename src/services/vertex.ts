@@ -721,9 +721,19 @@ Then provide your final answer.`;
         const executedActions: ToolAction[] = [];
 
         // Add model's thinking so far to history
+        // Add model's thinking so far to history
+        const modelParts: any[] = [];
+        if (accumulatedText && accumulatedText.trim()) {
+          modelParts.push({ text: accumulatedText });
+        }
+        // Add function calls as separate parts (Gemini can issue multiple calls)
+        for (const fc of accumulatedFunctions) {
+          modelParts.push({ functionCall: fc });
+        }
+
         contents.push({
           role: 'model',
-          parts: [{ text: accumulatedText || ' ', functionCall: accumulatedFunctions[0] }] // Simplified history push
+          parts: modelParts
         });
 
         const functionResponseParts: any[] = [];
