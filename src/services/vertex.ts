@@ -284,7 +284,6 @@ export class VertexService {
           }
         } catch (e) {
           console.error('Mastermind DEBUG: AI Studio discovery failed', e);
-          // Don't throw, just continue to fallbacks
         }
 
       }
@@ -320,13 +319,17 @@ export class VertexService {
           console.log(`Mastermind: Discovery pass for region ${searchRegion}`);
 
           // Fetch Publisher Models
-          const pubUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${searchRegion}/publishers/google/models`;
+          // NOTE: Using non-project-scoped endpoint for public models to avoid 404s
+          const pubUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1/publishers/google/models`;
+          console.log(`Mastermind DEBUG: Fetching Publisher Models: ${pubUrl}`);
           try {
             const response = await requestUrl({
               url: pubUrl,
               method: 'GET',
               headers: { 'Authorization': `Bearer ${accessToken}` }
             });
+
+            console.log(`Mastermind DEBUG: Publisher Response ${searchRegion}: ${response.status}`);
 
             if (response.status === 200 && response.json.publisherModels) {
               response.json.publisherModels.forEach((m: any) => {
@@ -335,15 +338,19 @@ export class VertexService {
                   foundModels.add(name);
                 }
               });
+              console.log(`Mastermind DEBUG: Models found so far: ${foundModels.size}`);
+            } else {
+              console.warn(`Mastermind DEBUG: Publisher Models returned unexpected status ${response.status}`);
             }
           } catch (e) {
-            console.warn(`Mastermind: Failed to list publisher models in ${searchRegion}`, e);
+            console.warn(`Mastermind DEBUG: Failed to list publisher models in ${searchRegion}`, e);
           }
 
           // Fetch Project Models (Custom)
           // Only try this if user actually has a project ID
           if (projectId) {
             const projUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${searchRegion}/models`;
+            console.log(`Mastermind DEBUG: Fetching Project Models: ${projUrl}`);
             try {
               const response = await requestUrl({
                 url: projUrl,
@@ -351,13 +358,15 @@ export class VertexService {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
               });
 
+              console.log(`Mastermind DEBUG: Project Models Response ${searchRegion}: ${response.status}`);
+
               if (response.status === 200 && response.json.models) {
                 response.json.models.forEach((m: any) => {
                   foundModels.add(m.name.split('/').pop());
                 });
               }
             } catch (e) {
-              console.warn(`Mastermind: Failed to list project models in ${searchRegion}`, e);
+              console.warn(`Mastermind DEBUG: Failed to list project models in ${searchRegion}`, e);
             }
           }
         }
@@ -371,15 +380,14 @@ export class VertexService {
     // ALWAYS ensure we have at least the fallbacks if nothing was found
     // This prevents empty dropdowns which break the UI
     if (foundModels.size === 0) {
-      new Notice('Mastermind: No models found from API. Using fallback list.');
-      return FALLBACK_MODELS;
+      new Notice('Mastermind: No models found from API.');
+      console.warn('Mastermind DEBUG: No models found.');
+      return [];
     }
-
-    // Merge Fallbacks into Found (so users see newly discovered ones + standard ones)
-    uniqueFallbacks.forEach(m => foundModels.add(m));
 
     const finalList = Array.from(foundModels).sort();
     new Notice(`Mastermind: Found ${finalList.length} models.`);
+    console.log('Mastermind DEBUG: Final Model List:', finalList);
     return finalList;
   }
 
