@@ -14,6 +14,11 @@
     height: 100%;
     background: var(--chat-bg);
     font-family: 'Inter', var(--font-interface), sans-serif;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
 }
 
 /* TOOLBAR - Transparent */
@@ -78,6 +83,8 @@
 .chat-messages {
     flex-grow: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
     padding: 60px 20px 20px 20px;
     display: flex;
     flex-direction: column;
@@ -121,6 +128,15 @@
     /* Ensure selectable */
     -webkit-user-select: text;
     transition: transform 0.2s ease;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.chat-message pre,
+.chat-message code {
+    white-space: pre-wrap;
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 /* User Message - Premium Gradient */
@@ -333,7 +349,8 @@
     padding: 8px 12px !important;
     color: var(--text-muted) !important;
     font-style: italic;
-    font-family: 'Inter', var(--font-interface), sans-serif !important; /* Use interface font for thoughts, not code font */
+    font-family: 'Inter', var(--font-interface), sans-serif !important;
+    /* Use interface font for thoughts, not code font */
 }
 
 /* Hide the "thinking" language label if possible, or style it */
@@ -350,47 +367,47 @@
 
 /* Tool Action Cards */
 .chat-tool-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-  width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+    width: 100%;
 }
 
 .tool-action-card {
-  background-color: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 0.9em;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.9em;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .tool-action-card.tool-error {
-  border-color: var(--text-error);
-  background-color: rgba(var(--color-red-rgb), 0.1);
+    border-color: var(--text-error);
+    background-color: rgba(var(--color-red-rgb), 0.1);
 }
 
 .tool-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text-muted);
 }
 
 .tool-icon {
-  display: flex;
-  align-items: center;
+    display: flex;
+    align-items: center;
 }
 
 .tool-details {
-  color: var(--text-normal);
-  font-family: var(--font-monospace);
-  font-size: 0.85em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+    color: var(--text-normal);
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

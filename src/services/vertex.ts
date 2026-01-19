@@ -282,7 +282,7 @@ export class VertexService {
 
 
 
-  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): AsyncGenerator<ChatResponse> {
+  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): AsyncGenerator<ChatResponse> {
     console.log('Mastermind: Service - chat called');
     const accessToken = await this.getAccessToken();
     console.log('Mastermind: Service - token retrieved');
@@ -290,8 +290,10 @@ export class VertexService {
     const location = this.location || 'us-central1';
 
     try {
-      yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
+      yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location, '', '', 0, signal);
     } catch (error: any) {
+      if (signal?.aborted) return; // Silent exit on abort
+
       // Automatic Fallback to us-central1 for 404/400 or certain model errors
       const isConfigError = error.message.includes('404') || error.message.includes('not found') || error.message.includes('400');
 
@@ -299,19 +301,27 @@ export class VertexService {
         console.log(`Mastermind: Chat failed in ${location} (Error: ${error.message}). Falling back to us-central1 + Safe Model...`);
         // Override model to a known good one for fallback
         this.modelId = 'gemini-2.0-flash-exp';
-        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1');
+        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1', '', '', 0, signal);
       } else if (error.message.includes('400') && this.modelId !== 'gemini-2.0-flash-exp') {
         // Fallback for bad model name even if in us-central1
         console.log('Mastermind: 400 Bad Request. Retrying with gemini-2.0-flash-exp...');
         this.modelId = 'gemini-2.0-flash-exp';
-        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
+        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location, '', '', 0, signal);
       } else {
         throw error;
       }
     }
   }
 
-  private async *chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string, initialText: string = '', initialThinking: string = ''): AsyncGenerator<ChatResponse> {
+  private async *chatInternal(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], accessToken: string, projectId: string, location: string, initialText: string = '', initialThinking: string = '', recursionDepth: number = 0, signal?: AbortSignal): AsyncGenerator<ChatResponse> {
+    if (recursionDepth > 10) {
+      yield { text: "\n\n**Error:** Max recursion limit reached. The model is looping.", actions: [] };
+      return;
+    }
+
+    if (signal?.aborted) {
+      throw new Error('AbortError');
+    }
 
     // Model Selection
     const modelId = this.modelId || 'gemini-2.0-flash-exp';
@@ -622,7 +632,8 @@ Then provide your final answer.`;
       stream = this.streamRequest(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: signal
       });
     } catch (e) {
       console.error("Mastermind: Failed to initiate stream", e);
@@ -830,7 +841,7 @@ Then provide your final answer.`;
         // Actually, to avoid infinite recursion complexity in this single step,
         // I will just yield the final result for now or rely on the fact that existing flow expects text.
         // Recursion:
-        yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking);
+        yield* this.chatInternal(prompt, context, vaultService, contents, [], accessToken, projectId, location, accumulatedText, accumulatedThinking, recursionDepth + 1, signal);
       }
     } catch (e) {
       console.error("Mastermind: Streaming Loop Error", e);
@@ -885,7 +896,8 @@ Then provide your final answer.`;
       port: 443,
       path: url.pathname + url.search,
       method: options.method,
-      headers: options.headers
+      headers: options.headers,
+      signal: options.signal
     };
 
     const queue = new AsyncQueue<string>();

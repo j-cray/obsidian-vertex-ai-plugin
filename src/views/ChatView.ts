@@ -24,6 +24,10 @@ export class MastermindChatView extends ItemView {
   modelLabel!: HTMLElement;
   messages: ChatMessage[] = [];
 
+  abortController: AbortController | null = null;
+  sendButton!: HTMLElement;
+  isGenerating: boolean = false;
+
   constructor(leaf: WorkspaceLeaf, plugin: MastermindPlugin) {
     super(leaf);
     this.plugin = plugin;
@@ -80,14 +84,14 @@ export class MastermindChatView extends ItemView {
     newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
     newChatBtn.title = "New Conversation";
     newChatBtn.onclick = async () => {
+      if (this.isGenerating) {
+        new Notice("Please stop generation first.");
+        return;
+      }
       if (this.messages.length > 0) {
         if (!this.plugin.settings.history || !Array.isArray(this.plugin.settings.history)) {
           this.plugin.settings.history = [];
         }
-        // Save linear history (compatibility) - or we could save session objects.
-        // For now, let's keep the existing linear behavior for the "history" setting, purely as a log.
-        // But user asked for conversation management later.
-        // Let's just clear.
         await this.plugin.saveSettings();
       }
 
@@ -118,8 +122,6 @@ export class MastermindChatView extends ItemView {
 
     // --- MESSAGES ---
     this.messageContainer = container.createDiv('chat-messages');
-
-    // Initialize Renderer
     this.messageRenderer = new MessageRenderer(this.app, this.messageContainer);
 
     // --- INPUT AREA ---
@@ -142,7 +144,7 @@ export class MastermindChatView extends ItemView {
 
     this.inputEl = inputContainer.createEl('textarea', {
       cls: 'chat-input',
-      attr: { placeholder: 'Ask Mastermind...', rows: '1' }
+      attr: { rows: '1' } // Clean input, no placeholder
     });
 
     this.inputEl.addEventListener('input', () => {
@@ -154,13 +156,19 @@ export class MastermindChatView extends ItemView {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.handleSendMessage();
-        this.inputEl.style.height = 'auto';
+        this.inputEl.style.height = 'auto'; // Reset height
       }
     });
 
-    const sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
-    sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    sendButton.addEventListener('click', () => this.handleSendMessage());
+    this.sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
+    this.updateSendButton(false);
+    this.sendButton.addEventListener('click', () => {
+      if (this.isGenerating) {
+        this.stopGeneration();
+      } else {
+        this.handleSendMessage();
+      }
+    });
 
     // Hydrate History
     if (this.plugin.settings.history && this.plugin.settings.history.length > 0) {
@@ -169,10 +177,28 @@ export class MastermindChatView extends ItemView {
     this.renderMessages();
   }
 
+  updateSendButton(isGenerating: boolean) {
+    this.isGenerating = isGenerating;
+    if (isGenerating) {
+      this.sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
+      this.sendButton.title = "Stop Generating";
+    } else {
+      this.sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      this.sendButton.title = "Send Message";
+    }
+  }
+
+  stopGeneration() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+      new Notice("Generation stopped.");
+      this.updateSendButton(false);
+    }
+  }
+
   renderMessages() {
     this.messageContainer.empty();
-
-    // Bind container again just in case (e.g. if we rebuilt DOM)
     this.messageRenderer.renderTo(this.messageContainer);
 
     if (this.messages.length === 0) {
@@ -196,6 +222,11 @@ export class MastermindChatView extends ItemView {
     if (!message) return;
 
     this.inputEl.value = '';
+    this.updateSendButton(true); // Set to Stop state
+
+    // Initialize AbortController
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
 
     // Render User Message
     await this.messageRenderer.renderUserMessage(message, this.plugin.settings.profilePictureUser);
@@ -203,74 +234,68 @@ export class MastermindChatView extends ItemView {
     // Prepare AI Message Container (Streaming)
     const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
 
+    // Streaming Loop with Signal
+    let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
+
     try {
       this.vertexService.updateSettings(this.plugin.settings);
-      new Notice('Mastermind Debug: Starting chat...');
 
-      console.log('Mastermind: View - getting context');
       const context = await this.vaultService.getRelevantContext(message);
-      console.log('Mastermind: View - context retrieved');
       const images = await this.vaultService.getActiveNoteImages();
-      console.log('Mastermind: View - starting chat stream');
 
-      // Streaming Loop
-      let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
-
-      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images)) {
-        console.log('Mastermind: View received chunk', chunk);
-        await update(chunk, false); // isFinal = false
+      // Pass signal to chat
+      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images, signal)) {
+        if (signal.aborted) break;
+        await update(chunk, false);
         finalResponse = chunk;
       }
 
-      // Final Polish: Enhance Links
-      if (finalResponse.text) {
-        const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
-        finalResponse.text = enhancedText;
-        await update(finalResponse, true); // isFinal = true
+      if (!signal.aborted) {
+        // Final Polish only if not aborted
+        if (finalResponse.text) {
+          const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
+          finalResponse.text = enhancedText;
+          await update(finalResponse, true);
+        }
+
+        // State Updates
+        const userMsg: ChatMessage = { role: 'user', parts: [{ text: message }] };
+        const aiMsg: ChatMessage = {
+          role: 'model',
+          parts: [{ text: finalResponse.text }],
+          actions: finalResponse.actions
+        };
+
+        this.messages.push(userMsg);
+        this.messages.push(aiMsg);
+
+        this.plugin.settings.history.push(userMsg);
+        this.plugin.settings.history.push(aiMsg);
+
+        if (this.plugin.settings.history.length > 40) {
+          this.plugin.settings.history = this.plugin.settings.history.slice(-40);
+        }
+
+        await this.plugin.saveSettings();
+        await (this.vaultService as any).writeHistory(this.plugin.settings.history, (this as any).sessionId);
       }
-
-      // State Updates
-      const userMsg: ChatMessage = { role: 'user', parts: [{ text: message }] };
-      const aiMsg: ChatMessage = {
-        role: 'model',
-        parts: [{ text: finalResponse.text }],
-        actions: finalResponse.actions
-      };
-
-      this.messages.push(userMsg);
-      this.messages.push(aiMsg);
-
-      this.plugin.settings.history.push(userMsg);
-      this.plugin.settings.history.push(aiMsg);
-
-      if (this.plugin.settings.history.length > 40) {
-        this.plugin.settings.history = this.plugin.settings.history.slice(-40);
-      }
-
-      await this.plugin.saveSettings();
-
-      // Write to storage
-      await (this.vaultService as any).writeHistory(this.plugin.settings.history, (this as any).sessionId);
 
     } catch (error: any) {
-      console.error('Mastermind Error:', error);
-
-      let errorMessage = error instanceof Error ? error.message : String(error);
-      let helpfulTip = '';
-
-      if (errorMessage.includes('404')) {
-        helpfulTip = '\n\n**Tip**: This often means the model or project ID is incorrect, or the model is not available in the selected region. Try switching to `us-central1`.';
-      } else if (errorMessage.includes('403')) {
-        helpfulTip = '\n\n**Tip**: Check if your Service Account has the "Vertex AI User" role.';
+      if (error.name === 'AbortError' || signal.aborted) {
+        update({ text: `**[Stopped by User]**\n\n${finalResponse?.text || ''}`, actions: [] }, true);
+      } else {
+        console.error('Mastermind Error:', error);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+        update({ text: `**Error**: ${errorMessage}`, actions: [] }, true);
+        new Notice('Mastermind Chat failed.');
       }
-
-      // Update the streaming message with the error
-      update({ text: `**Error**: ${errorMessage}${helpfulTip}`, actions: [] }, true);
-      new Notice('Mastermind Chat failed.');
+    } finally {
+      this.updateSendButton(false);
+      this.abortController = null;
     }
   }
 
   async onClose() {
-    // Cleanup
+    this.stopGeneration();
   }
 }
