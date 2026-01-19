@@ -411,7 +411,7 @@ Then provide your final answer.`;
     // Tools definition (Reuse existing)
     const tools = [
       {
-        function_declarations: [
+        functionDeclarations: [
           {
             name: 'generate_image',
             description: 'Generates an image based on a prompt using Imagen 3. Use this when the user asks to draw, paint, or create an image.',
@@ -876,7 +876,13 @@ Then provide your final answer.`;
 
     const req = https.request(reqOptions, (res: any) => {
       if (res.statusCode && res.statusCode >= 300) {
-        queue.fail(new Error(`HTTP Error ${res.statusCode}`));
+        let errorBody = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => { errorBody += chunk; });
+        res.on('end', () => {
+          console.error(`Mastermind: HTTPS Error ${res.statusCode} Body:`, errorBody);
+          queue.fail(new Error(`HTTP Error ${res.statusCode}: ${errorBody}`));
+        });
         return;
       }
       res.setEncoding('utf8');
