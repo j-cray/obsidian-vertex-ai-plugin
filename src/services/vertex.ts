@@ -292,10 +292,19 @@ export class VertexService {
     try {
       yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
     } catch (error: any) {
-      // Automatic Fallback to us-central1 for 404 or certain model errors
-      if (location !== 'us-central1' && (error.message.includes('404') || error.message.includes('not found'))) {
-        console.log(`Mastermind: Chat failed in ${location}, falling back to us-central1...`);
+      // Automatic Fallback to us-central1 for 404/400 or certain model errors
+      const isConfigError = error.message.includes('404') || error.message.includes('not found') || error.message.includes('400');
+
+      if (location !== 'us-central1' && isConfigError) {
+        console.log(`Mastermind: Chat failed in ${location} (Error: ${error.message}). Falling back to us-central1 + Safe Model...`);
+        // Override model to a known good one for fallback
+        this.modelId = 'gemini-2.0-flash-exp';
         yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, 'us-central1');
+      } else if (error.message.includes('400') && this.modelId !== 'gemini-2.0-flash-exp') {
+        // Fallback for bad model name even if in us-central1
+        console.log('Mastermind: 400 Bad Request. Retrying with gemini-2.0-flash-exp...');
+        this.modelId = 'gemini-2.0-flash-exp';
+        yield* this.chatInternal(prompt, context, vaultService, history, images, accessToken, projectId, location);
       } else {
         throw error;
       }
