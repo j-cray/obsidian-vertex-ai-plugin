@@ -55,7 +55,17 @@ export class MessageRenderer {
       // Header
       const header = toolCard.createDiv('tool-header');
       const iconSpan = header.createSpan('tool-icon');
-      setIcon(iconSpan, 'wrench'); // Default icon
+      if (action.tool === 'run_terminal_command') {
+        setIcon(iconSpan, 'terminal-square');
+      } else if (action.tool === 'fetch_url') {
+        setIcon(iconSpan, 'link');
+      } else if (action.tool === 'google_search_retrieval') { // Internal name for grounding tool often varies
+        setIcon(iconSpan, 'globe');
+      } else if (action.tool === 'generate_image') {
+        setIcon(iconSpan, 'palette');
+      } else {
+        setIcon(iconSpan, 'wrench'); // Default icon
+      }
 
       const title = header.createSpan('tool-name');
       title.innerText = `Used ${action.tool}`;
@@ -71,6 +81,10 @@ export class MessageRenderer {
         details.innerText = action.input.path;
       } else if (action.tool === 'search_content') {
         details.innerText = `"${action.input.query}"`;
+      } else if (action.tool === 'run_terminal_command') {
+        details.createEl('code', { text: action.input.command, cls: 'tool-input-code' });
+      } else if (action.tool === 'fetch_url') {
+        details.innerText = action.input.url;
       } else {
         details.innerText = JSON.stringify(action.input);
       }

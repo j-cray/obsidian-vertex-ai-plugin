@@ -1,5 +1,9 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -546,6 +550,31 @@ Then provide your final answer.`;
             }
           },
           {
+            googleSearchRetrieval: {}
+          },
+          {
+            name: 'run_terminal_command',
+            description: 'Executes a shell command on the host OS. Use with caution.',
+            parameters: {
+              type: 'object',
+              properties: {
+                command: { type: 'string', description: 'The shell command to execute.' }
+              },
+              required: ['command']
+            }
+          },
+          {
+            name: 'fetch_url',
+            description: 'Fetches the content of a URL. Useful for reading documentation or articles.',
+            parameters: {
+              type: 'object',
+              properties: {
+                url: { type: 'string', description: 'The absolute URL to fetch.' }
+              },
+              required: ['url']
+            }
+          },
+          {
             name: 'append_to_note',
             description: 'Appends content to the end of a note.',
             parameters: {
@@ -717,6 +746,29 @@ Then provide your final answer.`;
             } else if (name === 'get_links') {
               const links = await vaultService.getLinks(args.path);
               result = { status: 'success', links: links };
+            } else if (name === 'run_terminal_command') {
+              // Security Check
+              // @ts-ignore
+              if (vaultService.app.plugins.getPlugin('obsidian-vertex-ai-plugin').settings.confirmDestructive) {
+                // For now, simple blocker. Later: UI confirmation.
+                throw new Error("Terminal commands are blocked because 'Confirm Destructive Actions' is enabled. Please disable it in settings to use this feature.");
+              }
+
+              try {
+                const { stdout, stderr } = await execAsync(args.command);
+                result = { status: 'success', stdout: stdout, stderr: stderr };
+              } catch (e: any) {
+                result = { status: 'error', message: e.message, stderr: e.stderr };
+              }
+            } else if (name === 'fetch_url') {
+              try {
+                const response = await requestUrl({ url: args.url });
+                // Limit size to avoid context overflow
+                const text = response.text.substring(0, 10000);
+                result = { status: 'success', content_snippet: text, full_length: response.text.length };
+              } catch (e: any) {
+                result = { status: 'error', message: e.message };
+              }
             }
           } catch (err: any) {
             console.error(`Mastermind: Tool ${name} error`, err);
