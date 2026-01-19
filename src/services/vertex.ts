@@ -320,7 +320,11 @@ export class VertexService {
       if (isEndpoint) {
         const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
         const host = effectiveLocation === 'global' ? 'aiplatform.googleapis.com' : `${effectiveLocation}-aiplatform.googleapis.com`;
-        url = `https://${host}/v1/${endpointResource}:predict`;
+
+        // Use SSE for streaming models
+        const useSSE = !isEndpoint;
+        url = `https://${host}/v1/${endpointResource}:${isEndpoint ? 'predict' : 'streamGenerateContent'}${useSSE ? '?alt=sse' : ''}`;
+
         body = {
           instances: [{ prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:` }],
           parameters: { temperature: 0.7, maxOutputTokens: 2048, topP: 0.95 }
@@ -594,20 +598,22 @@ Then provide your final answer.`;
       ]
     };
 
-    // --- NODE JS HTTPS STREAMING ---
-    console.log(`Mastermind: Starting stream request to ${url}`);
+    // --- FETCH STREAMING ---
+    console.log(`Mastermind: Starting fetch stream to ${url}`);
 
-    let stream;
-    try {
-      stream = this.streamRequest(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-        body: JSON.stringify(body)
-      });
-    } catch (e) {
-      console.error("Mastermind: Failed to initiate stream", e);
-      throw e;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok || !response.body) {
+      const errText = await response.text();
+      throw new Error(`Vertex AI Streaming Error ${response.status}: ${errText}`);
     }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
     let buffer = '';
     let accumulatedText = initialText;
@@ -618,8 +624,17 @@ Then provide your final answer.`;
 
     // STREAMING LOOP
     try {
-      for await (const chunk of stream) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          console.log('Mastermind: Fetch stream done');
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        console.log(`Mastermind: Fetch chunk received (${chunk.length} bytes)`);
         chunkCount++;
+
         // Handle SSE format "data: JSON\n\n"
         const lines = (buffer + chunk).split('\n');
         buffer = lines.pop() || ''; // Keep partial line
@@ -852,105 +867,5 @@ Then provide your final answer.`;
       return false;
     }
   }
-  // Node.js HTTPS Streaming Helper
-  // Node.js HTTPS Streaming Helper
-  private async *streamRequest(urlStr: string, options: any): AsyncGenerator<string> {
-    const https = require('https');
-    const { URL } = require('url');
-    const url = new URL(urlStr);
-    const reqOptions = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname + url.search,
-      method: options.method,
-      headers: options.headers
-    };
-
-    const queue = new AsyncQueue<string>();
-
-    const req = https.request(reqOptions, (res: any) => {
-      if (res.statusCode && res.statusCode >= 300) {
-        queue.fail(new Error(`HTTP Error ${res.statusCode}`));
-        return;
-      }
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => {
-        console.log(`Mastermind: HTTPS chunk received (${chunk.length} bytes)`);
-        queue.push(chunk);
-      });
-      res.on('end', () => {
-        console.log('Mastermind: HTTPS stream ended');
-        queue.close();
-      });
-      res.on('error', (err: Error) => {
-        console.error('Mastermind: HTTPS stream error', err);
-        queue.fail(err);
-      });
-    });
-
-    req.on('error', (err: any) => queue.fail(err));
-    req.write(options.body);
-    req.end();
-
-    yield* queue;
-  }
-}
-
-// Simple Async Queue for buffering stream events
-class AsyncQueue<T> {
-  private queue: T[] = [];
-  private resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-  private rejectNext: ((reason?: any) => void) | null = null;
-  private closed = false;
-  private error: Error | null = null;
-
-  push(value: T) {
-    if (this.closed) return;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value, done: false });
-    } else {
-      this.queue.push(value);
-    }
-  }
-
-  close() {
-    this.closed = true;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value: undefined as any, done: true });
-    }
-  }
-
-  fail(err: Error) {
-    this.error = err;
-    if (this.rejectNext) {
-      const reject = this.rejectNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      reject(err);
-    }
-  }
-
-  [Symbol.asyncIterator]() {
-    return {
-      next: () => {
-        if (this.error) return Promise.reject(this.error);
-        if (this.queue.length > 0) {
-          return Promise.resolve({ value: this.queue.shift()!, done: false });
-        }
-        if (this.closed) {
-          return Promise.resolve({ value: undefined as any, done: true });
-        }
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-          this.resolveNext = resolve;
-          this.rejectNext = reject;
-        });
-      }
-    };
-  }
+  // End of class
 }
