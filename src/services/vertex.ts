@@ -64,6 +64,7 @@ export class VertexService {
     this.isRefreshingToken = true;
     this.tokenRefreshPromise = (async () => {
       try {
+        console.log('Mastermind DEBUG: Starting Token Refresh');
         if (!this.serviceAccountJson) {
           throw new Error('Service Account JSON not configured.');
         }
@@ -71,7 +72,9 @@ export class VertexService {
         let credentials;
         try {
           credentials = JSON.parse(this.serviceAccountJson);
+          console.log('Mastermind DEBUG: Service Account JSON parsed successfully. Project ID:', credentials.project_id);
         } catch (e) {
+          console.error('Mastermind DEBUG: JSON Parse Error', e);
           throw new Error('Invalid Service Account JSON format.');
         }
 
@@ -82,6 +85,7 @@ export class VertexService {
         const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
 
         // Exchange JWT for Access Token
+        console.log('Mastermind DEBUG: Exchanging JWT for Access Token...');
         const response = await requestUrl({
           url: 'https://oauth2.googleapis.com/token',
           method: 'POST',
@@ -90,6 +94,7 @@ export class VertexService {
         });
 
         if (response.status !== 200) {
+          console.error(`Mastermind DEBUG: Token exchange failed. Status: ${response.status}. Body: ${response.text}`);
           throw new Error(`Failed to refresh token: ${response.text}`);
         }
 
@@ -97,8 +102,12 @@ export class VertexService {
         this.accessToken = data.access_token;
         // Set expiry to slightly less than 3600s to be safe
         this.tokenExpiry = Date.now() + (data.expires_in - 120) * 1000;
+        console.log('Mastermind DEBUG: Access Token retrieved successfully.');
 
         return this.accessToken!;
+      } catch (e) {
+        console.error('Mastermind DEBUG: Token Refresh Critical Failure', e);
+        throw e;
       } finally {
         this.isRefreshingToken = false;
         this.tokenRefreshPromise = null;
@@ -107,6 +116,24 @@ export class VertexService {
 
     return this.tokenRefreshPromise;
   }
+
+  // ... (createSignedJWT, base64url, arrayBufferToBase64, sign, getProjectId, getBaseUrl remain unchanged)
+  // Re-pasting them here to ensure context is maintained if needed, but the replace tool works on line ranges.
+  // Since I am replacing a huge chunk, I should just stick to the methods I'm changing or ensure I don't delete the helpers.
+  // The replace range is 55-324 which covers getAccessToken ONLY?? NO.
+  // Wait, the previous view_file showed listModels ending around line 306.
+  // I need to be careful not to delete the helper methods between getAccessToken and listModels.
+  // listModels starts around line 202.
+  // getAccessToken ends around 109.
+  // Helpers are 111-200.
+  // I should use MultiReplace to target getAccessToken and listModels separately.
+
+  // I will ABORT this single replace and use multi_replace instead for safety.
+  // Actually, I can't abort a tool call in the thought process.
+  // I will write the ReplacementContent to ONLY cover getAccessToken first, wait, the range I selected (55-324) is HUGE and risky.
+  // I'll fail this tool call intentionally or just do a safe replacement of getAccessToken (55-109) and then a separate one for listModels.
+  // Let's do getAccessToken first.
+
 
   private async createSignedJWT(email: string, privateKeyPem: string): Promise<string> {
     const header = { alg: 'RS256', typ: 'JWT' };
@@ -223,6 +250,8 @@ export class VertexService {
     const foundModels: Set<string> = new Set();
     const uniqueFallbacks = new Set(FALLBACK_MODELS); // Use Set to avoid dupes if API returns them
 
+    console.log('Mastermind DEBUG: Starting listModels. Provider:', this.authProvider);
+
     try {
       // BRANCH 1: AI STUDIO
       if (this.authProvider === 'aistudio') {
@@ -232,11 +261,15 @@ export class VertexService {
 
         new Notice('Mastermind: Discovering AI Studio models...');
         try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.aiStudioKey}`;
+          console.log('Mastermind DEBUG: Fetching AI Studio models from:', url);
           const response = await requestUrl({
-            url: `https://generativelanguage.googleapis.com/v1beta/models?key=${this.aiStudioKey}`,
+            url: url,
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
           });
+
+          console.log(`Mastermind DEBUG: AI Studio response status: ${response.status}`);
 
           if (response.status === 200 && response.json.models) {
             response.json.models.forEach((m: any) => {
@@ -245,11 +278,12 @@ export class VertexService {
                 foundModels.add(name);
               }
             });
+            console.log(`Mastermind DEBUG: AI Studio found ${foundModels.size} models.`);
           } else {
-            console.warn('Mastermind: AI Studio listing returned unexpected status', response.status);
+            console.warn('Mastermind DEBUG: AI Studio listing returned unexpected status', response.status);
           }
         } catch (e) {
-          console.error('Mastermind: AI Studio discovery failed', e);
+          console.error('Mastermind DEBUG: AI Studio discovery failed', e);
           // Don't throw, just continue to fallbacks
         }
 
@@ -257,7 +291,15 @@ export class VertexService {
       // BRANCH 2: VERTEX AI
       else {
         const projectId = this.getProjectId();
-        const accessToken = await this.getAccessToken(); // Might throw if auth invalid
+        console.log('Mastermind DEBUG: Extracted Project ID:', projectId);
+
+        let accessToken;
+        try {
+          accessToken = await this.getAccessToken(); // Might throw if auth invalid
+        } catch (e) {
+          console.error('Mastermind DEBUG: Failed to retrieve access token in listModels loop', e);
+          throw e;
+        }
 
         // Multi-Pass Discovery
         // Pass 1: Selected Region
@@ -269,6 +311,7 @@ export class VertexService {
         }
 
         new Notice(`Mastermind: Discovering models (Project: ${projectId})...`);
+        console.log('Mastermind DEBUG: Regions to try for discovery:', regionsToTry);
 
         for (const region of regionsToTry) {
           // Skip if global - 'global' region often 404s on listModels, better to use us-central1
@@ -277,7 +320,7 @@ export class VertexService {
           console.log(`Mastermind: Discovery pass for region ${searchRegion}`);
 
           // Fetch Publisher Models
-          const pubUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${searchRegion}/publishers/google/models`;
+          const pubUrl = `https://${searchRegion}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${searchRegion}/publishers/google/models`;
           try {
             const response = await requestUrl({
               url: pubUrl,
@@ -321,7 +364,7 @@ export class VertexService {
       }
 
     } catch (error: any) {
-      console.error('Mastermind: Model discovery error:', error);
+      console.error('Mastermind DEBUG: Model discovery critical error:', error);
       new Notice(`Mastermind Discovery Notice: ${error.message || 'Check console details'}`);
     }
 
