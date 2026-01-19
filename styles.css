@@ -467,3 +467,25 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* Strict Thinking Visuals */
+.thinking-content {
+    display: block;
+    font-family: var(--font-monospace);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    color: var(--text-muted);
+    background-color: var(--background-secondary);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    border-left: 2px solid var(--interactive-accent);
+}
+
+.thinking-code-block {
+    opacity: 0.6;
+    max-height: 100px;
+    overflow-y: auto;
+    border-left: 2px solid var(--text-muted);
+}

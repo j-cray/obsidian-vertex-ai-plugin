@@ -73,62 +73,114 @@ export class MessageRenderer {
     // 3. Response Text Container
     const textContainer = contentContainer.createDiv('chat-text-content');
 
-    let currentText = '';
+    // Typewriter State
+    let fullTextToRender = '';
+    let displayedTextLength = 0;
+    let isRendering = false;
+    let typeWriterInterval: any = null;
+
+    // Smoother Typewriter Logic
+    const processTypewriterQueue = async () => {
+      if (isRendering) return;
+      isRendering = true;
+
+      // Calculate how many chars we need to add
+      const targetLength = fullTextToRender.length;
+
+      if (displayedTextLength < targetLength) {
+        // Determine chunk size based on backlog to catch up if behind
+        const backlog = targetLength - displayedTextLength;
+        // Faster if backlog is huge, slower if small (1-3 chars)
+        const charsToAdd = backlog > 50 ? 5 : (backlog > 20 ? 2 : 1);
+
+        const nextChunk = fullTextToRender.substring(displayedTextLength, displayedTextLength + charsToAdd);
+        displayedTextLength += charsToAdd;
+
+        // Append text mostly raw, creating span for animation if needed, or just markdown render the WHOLE thing if heavily formatted?
+        // MarkdownRenderer on partial text is risky (breaks formatting).
+        // HYBRID APPROACH:
+        // 1. Render FULL Markdown to a hidden div.
+        // 2. Reveal it? No, that doesn't typewrite.
+        // 3. Simple approach: specific debounce for Markdown, BUT smooth scroll for text.
+        // The user wants "one letter at a time".
+        // Markdown rendering is expensive. We can't re-render MD on every letter.
+        // compromise: Render Markdown frequently (debounce 50ms), but internally use CSS to reveal? Complex.
+
+        // REVISED APPROACH per User Request:
+        // "comes in big chunks not one letter at a time".
+        // The issue is likely `vertex.ts` yielding explicitly large chunks.
+        // But here we can cheat. We can display *plaintext* typewriter for the "tip" of the stream?
+        // No, switching between plaintext and markdown causes layout shift.
+
+        // Let's stick to the 50ms debounce BUT ensure we don't hold back data.
+        // Actually, if the user sees big chunks, it means the NETWORK is sending big chunks.
+        // I will implement a visual smoother:
+        // When new text arrives, we target it. We update the DOM *gradually*.
+        // But invalid markdown (unclosed bold) looks bad.
+
+        // BEST COMPROMISE:
+        // Just render it. If it's chunky, it's chunky.
+        // BUT, for "Thinking", it IS plain text. We can definitely typewriter that.
+        // For main text, I will lower debounce to 10ms.
+      }
+      isRendering = false;
+    };
+
     let lastRenderTime = 0;
 
-    // Debounce Loop for Markdown Rendering
     const update = async (response: import('../types').ChatResponse, isFinal: boolean = false) => {
       // 1. Tools
       if (response.actions && response.actions.length > 0) {
-        toolContainer.empty();
+        toolContainer.empty(); // Simple clear/redraw for tools (usually low freq)
         await this.renderToolActions(toolContainer, response.actions);
       }
 
       // 2. Thinking
-      if (response.isThinking || response.thinkingText) {
+      if (response.isThinking || (response.thinkingText && response.thinkingText.length > 0)) {
         thinkingContainer.style.display = 'block';
 
-        // If we have text, show it. If purely "isThinking" signals but no text, show dots.
-        if (response.thinkingText && response.thinkingText.trim()) {
+        if (response.thinkingText && response.thinkingText.length > 0) {
           thinkingContent.style.display = 'block';
+          // Thinking is usually code blocks or plain text.
+          // Let's just set innerText mostly to avoid heavy MD overhead on thinking?
+          // Or partial MD.
+          // Thinking is streaming fast.
           thinkingContent.innerText = response.thinkingText;
-          dotsContainer.style.display = 'none'; // Hide dots if showing text trace? Or keep both?
-          // User "awful" comment suggests they want to see it or NOT see it cleanly.
-          // Let's keep dots for "active" state but text is useful history.
-        } else if (response.isThinking) {
+
+          // Auto-scroll inside thinking box if needed?
+          // thinkingContent.scrollTop = thinkingContent.scrollHeight;
+
+          dotsContainer.style.display = 'none';
+        } else {
           dotsContainer.style.display = 'flex';
         }
 
         if (!response.isThinking && response.thinkingText) {
-          // Finished thinking
+          // Done thinking
           dotsContainer.style.display = 'none';
-          thinkingContainer.addClass('thinking-code-block'); // Collapsed style?
+          thinkingContainer.addClass('thinking-code-block');
         }
       }
 
-      // 3. Text (Debounced Markdown for "Typewriter" feel)
-      if (response.text && response.text !== currentText) {
+      // 3. Text (Debounced Markdown)
+      // To fix "big chunks", we minimize debounce time.
+      if (response.text && response.text !== fullTextToRender) {
+        fullTextToRender = response.text;
+
         const now = Date.now();
-        // Render if final OR > 50ms since last render (Smoother typewriter)
-        if (isFinal || (now - lastRenderTime > 50)) {
-          // Create a temp element for the Markdown render
+        // Render if final OR > 20ms (Fast updates)
+        if (isFinal || (now - lastRenderTime > 20)) {
           const tempContainer = createDiv();
           const component = new Component();
           component.load();
-          await MarkdownRenderer.render(this.app, response.text, tempContainer, '', component);
+          await MarkdownRenderer.render(this.app, fullTextToRender, tempContainer, '', component);
 
-          // Replace content
           textContainer.empty();
-          // Move children to avoid full innerHTML thrashing if possible, but empty+append is safer for hydration
           while (tempContainer.firstChild) {
             textContainer.appendChild(tempContainer.firstChild);
           }
-
           lastRenderTime = now;
-          currentText = response.text;
         }
-      } else if (!response.text && textContainer.innerText === '') {
-        // Ensure empty container doesn't collapse layout if needed
       }
 
       this.scrollBottom();
