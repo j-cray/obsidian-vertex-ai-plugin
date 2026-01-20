@@ -604,7 +604,7 @@ class MastermindSettingTab extends PluginSettingTab {
       .addButton(btn => btn
         .setButtonText('Save Current')
         .onClick(async () => {
-          const promptName = prompt('Enter a name for this prompt:', 'My Custom Prompt');
+          const promptName = window.prompt('Enter a name for this prompt:', 'My Custom Prompt');
           if (promptName) {
             if (!this.plugin.settings.savedPrompts) {
               this.plugin.settings.savedPrompts = [];
@@ -625,13 +625,19 @@ class MastermindSettingTab extends PluginSettingTab {
         }))
       .addDropdown(dropdown => {
         dropdown.addOption('', '-- Load Saved Prompt --');
+        dropdown.addOption('__DEFAULT__', '⭐ Default Prompt');
         if (this.plugin.settings.savedPrompts) {
           this.plugin.settings.savedPrompts.forEach(p => {
             dropdown.addOption(p.name, p.name);
           });
         }
         dropdown.onChange(async (value) => {
-          if (value) {
+          if (value === '__DEFAULT__') {
+            this.plugin.settings.customContextPrompt = DEFAULT_SETTINGS.customContextPrompt;
+            await this.plugin.saveSettings();
+            new Notice('Loaded default prompt.');
+            this.display();
+          } else if (value) {
             const saved = this.plugin.settings.savedPrompts?.find(p => p.name === value);
             if (saved) {
               this.plugin.settings.customContextPrompt = saved.content;
