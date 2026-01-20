@@ -142,7 +142,7 @@ export class VertexService {
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
         const url = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
-        console.log('Mastermind DEBUG: Fetching models from:', url);
+        console.log('Mastermind DEBUG: Fetching models from (v1beta1):', url);
         console.log('Mastermind DEBUG: Project ID:', projectId);
         console.log('Mastermind DEBUG: Location:', location);
         console.log('Mastermind DEBUG: Service Account:', credentials.client_email);
@@ -256,7 +256,7 @@ export class VertexService {
     };
       } catch (error: any) {
         const status = (error?.response as any)?.status;
-        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error);
+        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error, 'URL:', url);
 
 
       // 3. Scrape the public docs page for published model IDs as a last-mile source
@@ -323,13 +323,15 @@ export class VertexService {
       if (cached) {
         const parsed = JSON.parse(cached) as { ts: number; models: string[] };
         if (parsed?.models && Array.isArray(parsed.models) && parsed.ts && Date.now() - parsed.ts < cacheTtlMs) {
-          console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length);
+          console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length, 'age(ms):', Date.now() - parsed.ts);
           return parsed.models;
         }
       }
     } catch (err) {
       console.warn('Mastermind: Failed to read model cache.', err);
     }
+
+    console.log('Mastermind DEBUG: Cache miss or stale; starting docs scrape.');
 
     console.log('Mastermind DEBUG: Docs fetch URL:', docsUrl);
     const stillRunningTimer = window.setTimeout(() => {
