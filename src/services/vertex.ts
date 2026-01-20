@@ -2,7 +2,6 @@ import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
 import { ModelServiceClient } from '@google-cloud/aiplatform';
-import { GoogleAuth } from 'google-auth-library';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -51,19 +50,24 @@ export class VertexService {
 
     const apiHost = this.getApiHost(this.location || 'us-central1');
 
-    // Create explicit GoogleAuth to bypass metadata server
-    const authClient = new GoogleAuth({
-      credentials: credentials,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform']
-    });
-
-    // Initialize Vertex AI client with explicit auth client
+    // Initialize Vertex AI client with service account credentials
     this.vertexClient = new VertexAI({
       project: credentials.project_id,
       location: this.location || 'us-central1',
       apiEndpoint: apiHost,
-      googleAuthOptions: {
-        authClient: authClient as any
+      googleAuth: {
+        credentials: {
+          type: 'service_account',
+          project_id: credentials.project_id,
+          private_key_id: credentials.private_key_id,
+          private_key: credentials.private_key,
+          client_email: credentials.client_email,
+          client_id: credentials.client_id,
+          auth_uri: credentials.auth_uri,
+          token_uri: credentials.token_uri,
+          auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
+          client_x509_cert_url: credentials.client_x509_cert_url,
+        }
       }
     });
 
