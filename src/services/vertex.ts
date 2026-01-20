@@ -20,6 +20,32 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
+  static getFallbackModelsFor(authProvider: string): string[] {
+    if (authProvider === 'aistudio') {
+      return [
+        'gemini-3-pro-preview',
+        'gemini-3-flash-preview',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro-002',
+        'gemini-1.5-flash-002',
+        'gemini-1.0-pro'
+      ];
+    }
+    // Default to Vertex AI models
+    return [
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
+      'gemini-2.0-flash-exp',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro-002',
+      'gemini-1.5-flash-002',
+      'gemini-1.0-pro'
+    ];
+  }
+
   updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.serviceAccountJson = settings.serviceAccountJson;
     this.location = settings.location;
@@ -515,7 +541,9 @@ Then provide your final answer.`;
 
       const part = candidate.content.parts[0];
 
-      for (const funcCall of accumulatedFunctions) {
+      // Check if there are tool use calls
+      if (part.functionCall) {
+        const funcCall = part.functionCall;
         const { name, args } = funcCall;
         let result: any;
 
@@ -535,6 +563,8 @@ Then provide your final answer.`;
           } else if (name === 'delete_file') {
             await vaultService.deleteFile(args.path);
             result = { status: 'success', message: `File deleted at ${args.path}` };
+          } else if (name === 'list_directory') {
+            result = await vaultService.listDirectory(args.path);
           }
         } catch (err: any) {
           result = { status: 'error', message: err.message };
