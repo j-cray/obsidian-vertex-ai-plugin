@@ -30,6 +30,7 @@ interface MastermindSettings {
   profilePictureUser: string;
   profilePictureAI: string;
   customContextPrompt: string;
+  savedPrompts: Array<{ name: string; content: string }>;
   defaultModel: string;
   availableModels: string[];
   // Generation Params
@@ -53,6 +54,7 @@ const DEFAULT_SETTINGS: MastermindSettings = {
   confirmTerminalDestructive: true,
   profilePictureUser: 'https://api.dicebear.com/7.x/notionists/svg?seed=User',
   profilePictureAI: 'https://api.dicebear.com/7.x/bottts/svg?seed=Mastermind',
+  savedPrompts: [],
   customContextPrompt: `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
 Be concise, professional, and insightful.
@@ -235,6 +237,12 @@ export default class MastermindPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+    // If customContextPrompt is empty, populate with the rich default
+    if (!this.settings.customContextPrompt || this.settings.customContextPrompt.trim() === '') {
+      this.settings.customContextPrompt = DEFAULT_SETTINGS.customContextPrompt;
+      await this.saveSettings();
+    }
 
     const canListModels =
       this.settings.availableModels.length === 0 &&
@@ -587,9 +595,86 @@ class MastermindSettingTab extends PluginSettingTab {
           }),
       );
 
+    // Prompt Library Management
+    containerEl.createEl('h3', { text: 'Custom Context Prompt' });
+
     new Setting(containerEl)
-      .setName('Custom Context Prompt')
-      .setDesc('Additional instructions for the AI (e.g., "Be concise").')
+      .setName('Prompt Library')
+      .setDesc('Save, load, or reset custom prompts.')
+      .addButton(btn => btn
+        .setButtonText('Save Current')
+        .onClick(async () => {
+          const promptName = prompt('Enter a name for this prompt:', 'My Custom Prompt');
+          if (promptName) {
+            if (!this.plugin.settings.savedPrompts) {
+              this.plugin.settings.savedPrompts = [];
+            }
+            const existing = this.plugin.settings.savedPrompts.findIndex(p => p.name === promptName);
+            if (existing >= 0) {
+              this.plugin.settings.savedPrompts[existing].content = this.plugin.settings.customContextPrompt;
+            } else {
+              this.plugin.settings.savedPrompts.push({
+                name: promptName,
+                content: this.plugin.settings.customContextPrompt
+              });
+            }
+            await this.plugin.saveSettings();
+            new Notice(`Prompt "${promptName}" saved.`);
+            this.display();
+          }
+        }))
+      .addDropdown(dropdown => {
+        dropdown.addOption('', '-- Load Saved Prompt --');
+        if (this.plugin.settings.savedPrompts) {
+          this.plugin.settings.savedPrompts.forEach(p => {
+            dropdown.addOption(p.name, p.name);
+          });
+        }
+        dropdown.onChange(async (value) => {
+          if (value) {
+            const saved = this.plugin.settings.savedPrompts?.find(p => p.name === value);
+            if (saved) {
+              this.plugin.settings.customContextPrompt = saved.content;
+              await this.plugin.saveSettings();
+              new Notice(`Loaded prompt "${value}".`);
+              this.display();
+            }
+          }
+        });
+      })
+      .addButton(btn => btn
+        .setButtonText('Reset to Default')
+        .setWarning()
+        .onClick(async () => {
+          this.plugin.settings.customContextPrompt = DEFAULT_SETTINGS.customContextPrompt;
+          await this.plugin.saveSettings();
+          new Notice('Reset to default prompt.');
+          this.display();
+        }))
+      .addButton(btn => btn
+        .setButtonText('Delete Current')
+        .setWarning()
+        .onClick(async () => {
+          if (!this.plugin.settings.savedPrompts || this.plugin.settings.savedPrompts.length === 0) {
+            new Notice('No saved prompts to delete.');
+            return;
+          }
+          const currentPrompt = this.plugin.settings.customContextPrompt;
+          const matchIndex = this.plugin.settings.savedPrompts.findIndex(p => p.content === currentPrompt);
+          if (matchIndex >= 0) {
+            const name = this.plugin.settings.savedPrompts[matchIndex].name;
+            this.plugin.settings.savedPrompts.splice(matchIndex, 1);
+            await this.plugin.saveSettings();
+            new Notice(`Deleted saved prompt "${name}".`);
+            this.display();
+          } else {
+            new Notice('Current prompt is not in saved library.');
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Current Prompt')
+      .setDesc('Edit the active custom prompt for Mastermind.')
       .addTextArea(text => text
         .setPlaceholder('You are an expert coder...')
         .setValue(this.plugin.settings.customContextPrompt)
