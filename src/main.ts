@@ -60,6 +60,57 @@ const DEFAULT_SETTINGS: MastermindSettings = {
   temperature: 0.7
 }
 
+const PRECACHED_MODELS: string[] = [
+  'gemini-3-pro',
+  'gemini-3-flash',
+  'gemini-2.5-flash-image',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash-live-api',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-3-pro-preview',
+  'gemini-3-flash-preview',
+  'gemini-3-pro-image',
+  'gemma-3n',
+  'gemma-3',
+  'gemma-2',
+  'gemma',
+  'shieldgemma-2',
+  'paligemma',
+  'codegemma',
+  'txgemma',
+  'medgemma',
+  'medsiglip',
+  't5gemma',
+  'text-embedding-005',
+  'text-embedding-004',
+  'text-multilingual-embedding-002',
+  'multimodalembedding',
+  'imagen-4.0-generate-001',
+  'imagen-4.0-fast-generate-001',
+  'imagen-4.0-ultra-generate-001',
+  'imagen-3.0-generate-002',
+  'imagen-3.0-generate-001',
+  'imagen-3.0-fast-generate-001',
+  'imagen-3.0-capability-001',
+  'imagen-virtual-try-on-preview',
+  'imagen-product-recontext-preview',
+  'veo-2.0-generate-001',
+  'veo-3.0-generate-001',
+  'veo-3.0-fast-generate-001',
+  'veo-3.1-generate-001',
+  'veo-3.1-fast-generate-001',
+  'veo-3.0-generate-preview',
+  'veo-3.0-fast-generate-preview',
+  'veo-3.1-generate-preview',
+  'veo-3.1-fast-generate-preview',
+  'veo-2.0-generate-exp',
+  'medlm-medium',
+  'medlm-large',
+];
+
 export default class MastermindPlugin extends Plugin {
   settings!: MastermindSettings;
   private settingsCallbacks: (() => void)[] = [];
@@ -340,6 +391,30 @@ class MastermindSettingTab extends PluginSettingTab {
             new Notice('Failed to fetch models.');
             console.error('Fetch error:', e);
           }
+        }))
+      .addExtraButton(btn => btn
+        .setIcon('rotate-ccw')
+        .setTooltip('Reset to precached models')
+        .onClick(async () => {
+          const dd = this.modelDropdown;
+          const uniqueOptions = [...new Set(PRECACHED_MODELS)];
+          if (uniqueOptions.length === 0) {
+            new Notice('No precached models available.');
+            return;
+          }
+
+          // @ts-ignore
+          dd.selectEl.innerHTML = '';
+          uniqueOptions.forEach(m => dd.addOption(m, m));
+          const nextModel = uniqueOptions.includes(this.plugin.settings.modelId)
+            ? this.plugin.settings.modelId
+            : uniqueOptions[0];
+          dd.setValue(nextModel);
+
+          this.plugin.settings.modelId = nextModel;
+          this.plugin.settings.availableModels = uniqueOptions;
+          await this.plugin.saveSettings();
+          new Notice(`Reset to ${uniqueOptions.length} precached models.`);
         }));
 
     containerEl.createEl('h3', { text: 'Generation Parameters' });
