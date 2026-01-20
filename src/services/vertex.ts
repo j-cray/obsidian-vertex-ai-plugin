@@ -333,46 +333,76 @@ export class VertexService {
       const body = response.text || '';
       console.log('Mastermind DEBUG: Models page body length:', body.length, 'elapsed(ms):', Date.now() - scrapeStart);
 
-      // Extract model names from headings and text
-      // Pattern 1: Model names in headings (e.g., "Gemini 2.5 Pro" -> gemini-2.5-pro)
-      const headingPattern = /<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi;
-      let headingMatch: RegExpExecArray | null;
+      // Pattern 1: Look for links to model pages like /docs/models/gemini/2-5-pro
+      const linkPattern = /href=["']([^"']*\/(?:gemini|imagen|veo|gemma)\/([^"'/#]+))["']/gi;
+      let linkMatch: RegExpExecArray | null;
+      let linkCount = 0;
       
-      while ((headingMatch = headingPattern.exec(body)) !== null) {
-        const headingText = headingMatch[1]?.replace(/<[^>]+>/g, '').trim();
-        if (headingText) {
-          // Convert heading like "Gemini 2.5 Pro" to "gemini-2.5-pro"
-          const normalized = headingText
+      while ((linkMatch = linkPattern.exec(body)) !== null) {
+        linkCount++;
+        const path = linkMatch[2]?.trim();
+        if (path && path.length >= 2) {
+          // Convert URL path like "2-5-pro" or "3-flash" to model ID
+          const segments = path.split('/').filter(s => s.length > 0);
+          for (const segment of segments) {
+            const normalized = segment.toLowerCase().replace(/_/g, '-');
+            // Match segments that look like model identifiers
+            if (normalized.length >= 2 && /[a-z0-9]/.test(normalized)) {
+              // Try to construct full model names
+              const fullPath = linkMatch[1];
+              if (fullPath.includes('/gemini/')) {
+                ids.add(`gemini-${normalized}`);
+              } else if (fullPath.includes('/imagen/')) {
+                ids.add(`imagen-${normalized}`);
+              } else if (fullPath.includes('/veo/')) {
+                ids.add(`veo-${normalized}`);
+              } else if (fullPath.includes('/gemma')) {
+                ids.add(normalized);
+              }
+            }
+          }
+        }
+      }
+
+      console.log('Mastermind DEBUG: Found', linkCount, 'model page links');
+
+      // Pattern 2: Look for anchor text like "Gemini 2.5 Pro" in links
+      const anchorPattern = /<a[^>]*href=["'][^"']*\/(?:gemini|imagen|veo|gemma)[^"']*["'][^>]*>([^<]+)<\/a>/gi;
+      let anchorMatch: RegExpExecArray | null;
+      let anchorCount = 0;
+      
+      while ((anchorMatch = anchorPattern.exec(body)) !== null) {
+        anchorCount++;
+        const text = anchorMatch[1]?.replace(/<[^>]+>/g, '').trim();
+        if (text && text.length >= 3) {
+          const normalized = text
             .toLowerCase()
             .replace(/\s+/g, '-')
             .replace(/[^\w.-]/g, '')
             .replace(/^-+|-+$/g, '');
           
-          // Check if it looks like a model name (contains letters and numbers/dots/hyphens)
-          if (normalized.length >= 5 && /[a-z]/.test(normalized) && /[0-9]/.test(normalized) && /[-.]/.test(normalized)) {
+          if (normalized.length >= 3 && /[a-z]/.test(normalized)) {
             ids.add(normalized);
           }
         }
       }
 
-      // Pattern 2: Model IDs in code blocks or API references
-      const codePatterns = [
-        /<code[^>]*>([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)<\/code>/gi,
-        /publishers\/google\/models\/([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)/gi,
-        /["']?model["']?\s*[:=]\s*["']([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)["']/gi,
-      ];
+      console.log('Mastermind DEBUG: Found', anchorCount, 'model anchor texts');
 
-      for (const pattern of codePatterns) {
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(body)) !== null) {
-          const candidate = match[1]?.trim().toLowerCase();
-          if (candidate && candidate.length >= 5 && candidate.length <= 80) {
-            if (/^[a-z]/.test(candidate) && /[-.]/.test(candidate)) {
-              ids.add(candidate);
-            }
-          }
+      // Pattern 3: Direct model IDs in code blocks
+      const codePattern = /<code[^>]*>([a-z][a-z0-9._-]{4,79})<\/code>/gi;
+      let codeMatch: RegExpExecArray | null;
+      let codeCount = 0;
+      
+      while ((codeMatch = codePattern.exec(body)) !== null) {
+        codeCount++;
+        const candidate = codeMatch[1]?.trim().toLowerCase();
+        if (candidate && /[-.]/.test(candidate)) {
+          ids.add(candidate);
         }
       }
+
+      console.log('Mastermind DEBUG: Found', codeCount, 'model IDs in code blocks');
 
     } catch (err) {
       console.warn('Mastermind: Docs scrape error:', err);
