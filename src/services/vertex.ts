@@ -124,7 +124,7 @@ export class VertexService {
         console.warn('Mastermind: Failed to fetch custom models from Model Registry.', error);
       }
 
-      // 2. Fetch foundational models from Google Publishers via REST API
+      // 2. Try to fetch foundational models from Google Publishers
       try {
         const credentialsObj = {
           type: 'service_account',
@@ -141,8 +141,9 @@ export class VertexService {
 
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
+        // Try v1beta1 API with correct publisher models endpoint
         const response = await requestUrl({
-          url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+          url: `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models`,
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -151,19 +152,44 @@ export class VertexService {
         });
 
         if (response.status === 200) {
-          const data = response.json as { models?: Array<{ displayName?: string; name?: string }> };
+          const data = response.json as { models?: Array<{ displayName?: string; name?: string; model?: string }> };
           if (data.models && data.models.length > 0) {
             data.models.forEach((model: any) => {
-              const name = model.displayName || model.name;
-              if (typeof name === 'string' && !modelNames.includes(name)) {
-                modelNames.push(name);
+              // Extract model ID from resource name (e.g., "publishers/google/models/gemini-pro")
+              let name = model.displayName || model.model || model.name;
+              if (typeof name === 'string') {
+                // If it's a full resource path, extract just the model name
+                if (name.includes('/')) {
+                  const parts = name.split('/');
+                  name = parts[parts.length - 1];
+                }
+                if (!modelNames.includes(name)) {
+                  modelNames.push(name);
+                }
               }
             });
           }
         }
       } catch (error) {
-        console.warn('Mastermind: Failed to fetch foundational models from Model Garden.', error);
+        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', error);
       }
+
+      // 3. Add known foundational models as fallback
+      const knownFoundationalModels = [
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.0-pro',
+        'text-bison',
+        'text-bison-32k',
+      ];
+
+      knownFoundationalModels.forEach(model => {
+        if (!modelNames.includes(model)) {
+          modelNames.push(model);
+        }
+      });
 
       // Return combined list, deduplicated and sorted
       const unique = [...new Set(modelNames)].sort();
