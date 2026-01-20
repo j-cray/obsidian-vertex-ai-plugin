@@ -118,6 +118,19 @@ export default class MastermindPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
+    // Warm up auth early to avoid delay on first message
+    if (this.settings.serviceAccountJson) {
+      setTimeout(() => {
+        try {
+          const vertexService = new VertexService(this.settings);
+          // Just initializing triggers auth cache warmup
+          console.log('Mastermind: Auth warmup complete');
+        } catch (err) {
+          console.warn('Mastermind: Auth warmup failed (non-critical):', err);
+        }
+      }, 2000); // Wait 2s after plugin loads
+    }
+
     this.registerView(
       VIEW_TYPE_MASTERMIND,
       (leaf) => new MastermindChatView(leaf, this),

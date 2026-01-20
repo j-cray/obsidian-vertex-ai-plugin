@@ -50,6 +50,13 @@ export class VertexService {
 
     const apiHost = this.getApiHost(this.location || 'us-central1');
 
+    // Disable GCE metadata server checks to avoid timeout
+    // Set these before creating the client
+    if (typeof process !== 'undefined' && process.env) {
+      process.env.GCE_METADATA_HOST = 'metadata.google.internal.invalid';
+      process.env.SUPPRESS_GCLOUD_CREDS_WARNING = 'true';
+    }
+
     // Initialize Vertex AI client with service account credentials
     this.vertexClient = new VertexAI({
       project: credentials.project_id,
