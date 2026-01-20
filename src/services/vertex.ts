@@ -172,7 +172,7 @@ export class VertexService {
 
     try {
       const response = await requestUrl({
-        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/models?filter=labels.google-cloud-model-garden=true&pageSize=100`,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -182,16 +182,17 @@ export class VertexService {
 
       if (response.status === 200) {
         const data = response.json;
-        if (data.models) {
+        if (data.models && data.models.length > 0) {
           const fetched: string[] = data.models
-            .map((m: any) => m.name?.split('/').pop())
-            .filter((id: string | undefined): id is string => typeof id === 'string' && id.includes('gemini'));
+            .map((m: any) => m.displayName)
+            .filter((name: string | undefined): name is string => typeof name === 'string');
           const unique = [...new Set(fetched)].sort();
           if (unique.length > 0) {
             return unique;
           }
-          throw new Error('Vertex AI returned no Gemini models.');
+          throw new Error('Vertex AI returned no models.');
         }
+        throw new Error('Vertex AI returned no models.');
       }
       throw new Error(`Vertex AI listModels failed with status ${response.status}`);
     } catch (error) {
