@@ -1,7 +1,7 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
-import { ModelServiceClient, ModelGardenServiceClient } from '@google-cloud/aiplatform';
+import { ModelServiceClient } from '@google-cloud/aiplatform';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -124,23 +124,46 @@ export class VertexService {
         console.warn('Mastermind: Failed to fetch custom models from Model Registry.', error);
       }
 
-      // 2. Fetch foundational models from Model Garden (Gemini, PaLM, etc.)
+      // 2. Fetch foundational models from Google Publishers via REST API
       try {
-        const gardenClient = new ModelGardenServiceClient({
-          apiEndpoint: `${location}-aiplatform.googleapis.com`,
-          credentials: credentialsObj
+        const client = this.getVertexClient();
+        const accessTokenResp = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion: await this.createJWT(credentialsObj)
+          }).toString()
         });
 
-        const gardenParent = `projects/${projectId}/locations/${location}`;
-        const [gardenModels] = await gardenClient.listPublicModels({ parent: gardenParent });
+        if (!accessTokenResp.ok) {
+          throw new Error('Failed to get access token');
+        }
 
-        if (gardenModels && gardenModels.length > 0) {
-          gardenModels.forEach((model: any) => {
-            const name = model.displayName || model.name;
-            if (typeof name === 'string' && !modelNames.includes(name)) {
-              modelNames.push(name);
+        const tokenData = await accessTokenResp.json() as { access_token: string };
+        const accessToken = tokenData.access_token;
+
+        const response = await fetch(
+          `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
             }
-          });
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json() as { models?: Array<{ displayName?: string; name?: string }> };
+          if (data.models && data.models.length > 0) {
+            data.models.forEach((model: any) => {
+              const name = model.displayName || model.name;
+              if (typeof name === 'string' && !modelNames.includes(name)) {
+                modelNames.push(name);
+              }
+            });
+          }
         }
       } catch (error) {
         console.warn('Mastermind: Failed to fetch foundational models from Model Garden.', error);
@@ -158,6 +181,85 @@ export class VertexService {
       console.error('Mastermind: Failed to list models.', error);
       throw error;
     }
+  }
+
+  private async createJWT(credentials: any): Promise<string> {
+    const header = { alg: "RS256", typ: "JWT" };
+    const now = Math.floor(Date.now() / 1000);
+    const claim = {
+      iss: credentials.client_email,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      aud: "https://oauth2.googleapis.com/token",
+      exp: now + 3600,
+      iat: now,
+    };
+
+    const encodedHeader = this.base64url(JSON.stringify(header));
+    const encodedClaim = this.base64url(JSON.stringify(claim));
+    const unsignedToken = `${encodedHeader}.${encodedClaim}`;
+
+    const signature = await this.sign(unsignedToken, credentials.private_key);
+    return `${unsignedToken}.${signature}`;
+  }
+
+  private base64url(source: string | ArrayBuffer): string {
+    let encodedSource: string;
+    if (typeof source === "string") {
+      const bytes = new TextEncoder().encode(source);
+      encodedSource = this.arrayBufferToBase64(bytes);
+    } else {
+      encodedSource = this.arrayBufferToBase64(source);
+    }
+
+    return encodedSource
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
+  private async sign(data: string, privateKeyPem: string): Promise<string> {
+    const pemHeader = "-----BEGIN PRIVATE KEY-----";
+    const pemFooter = "-----END PRIVATE KEY-----";
+    const pemContents = privateKeyPem
+      .substring(
+        privateKeyPem.indexOf(pemHeader) + pemHeader.length,
+        privateKeyPem.indexOf(pemFooter),
+      )
+      .replace(/\s/g, "");
+
+    const binaryDerString = window.atob(pemContents);
+    const binaryDer = new Uint8Array(binaryDerString.length);
+    for (let i = 0; i < binaryDerString.length; i++) {
+      binaryDer[i] = binaryDerString.charCodeAt(i);
+    }
+
+    const crypto = window.crypto.subtle;
+    const key = await crypto.importKey(
+      "pkcs8",
+      binaryDer.buffer,
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256",
+      },
+      false,
+      ["sign"],
+    );
+
+    const encoder = new TextEncoder();
+    const dataBytes = encoder.encode(data);
+    const signature = await crypto.sign("RSASSA-PKCS1-v1_5", key, dataBytes);
+
+    return this.base64url(signature);
   }
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): Promise<AsyncGenerator<ChatResponse, void, unknown>> {
