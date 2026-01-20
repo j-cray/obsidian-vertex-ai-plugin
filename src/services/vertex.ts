@@ -183,7 +183,19 @@ export class VertexService {
         console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', error);
       }
 
-      // 3. Add known foundational models as fallback
+      // 3. Scrape the public docs page for published model IDs as a last-mile source
+      try {
+        const docsModels = await this.fetchModelIdsFromDocs();
+        docsModels.forEach((m) => {
+          if (!modelNames.includes(m)) {
+            modelNames.push(m);
+          }
+        });
+      } catch (error) {
+        console.warn('Mastermind: Failed to scrape docs for models.', error);
+      }
+
+      // 4. Add known foundational models as fallback
       const knownFoundationalModels = [
         'gemini-2.0-flash',
         'gemini-2.0-flash-exp',
@@ -309,6 +321,37 @@ export class VertexService {
     const signature = await crypto.sign("RSASSA-PKCS1-v1_5", key, dataBytes);
 
     return this.base64url(signature);
+  }
+
+  private async fetchModelIdsFromDocs(): Promise<string[]> {
+    const docsUrl = 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models';
+    const ids = new Set<string>();
+
+    const response = await requestUrl({ url: docsUrl, method: 'GET' });
+    if (response.status !== 200) {
+      return [];
+    }
+
+    const body = response.text || JSON.stringify(response.json ?? '');
+
+    const patterns = [
+      /(?:models\/|model-id=|modelId=|model:|["'`>])([a-z0-9][\w.\-]{2,})/gi,
+      /(?:<code>|<tt>|<samp>)([^<\s]+)(?:<\/code>|<\/tt>|<\/samp>)/gi,
+    ];
+
+    for (const re of patterns) {
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(body)) !== null) {
+        const candidate = match[1]?.trim();
+        if (!candidate) continue;
+        if (candidate.length < 3 || candidate.length > 80) continue;
+        if (!/[a-z]/i.test(candidate) || !/[\-.]/.test(candidate)) continue;
+        if (candidate.startsWith('http')) continue;
+        ids.add(candidate);
+      }
+    }
+
+    return [...ids];
   }
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): Promise<AsyncGenerator<ChatResponse, void, unknown>> {
