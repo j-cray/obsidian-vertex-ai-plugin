@@ -1,6 +1,7 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
+import { ModelServiceClient } from '@google-cloud/aiplatform';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -75,37 +76,54 @@ export class VertexService {
 
   async listModels(): Promise<string[]> {
     try {
-      const client = this.getVertexClient();
       const projectId = this.getProjectId();
       const location = this.location || 'us-central1';
 
-      // Use the SDK's list method (Google Cloud client libraries handle auth internally)
-      // For now, we'll construct the request manually but let the SDK handle auth
-      const response = await requestUrl({
-        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/models?pageSize=100`,
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
+      // Initialize ModelServiceClient with service account credentials
+      let credentials;
+      try {
+        credentials = JSON.parse(this.serviceAccountJson);
+      } catch (e) {
+        throw new Error('Invalid Service Account JSON format.');
+      }
+
+      const client = new ModelServiceClient({
+        apiEndpoint: `${location}-aiplatform.googleapis.com`,
+        credentials: {
+          type: 'service_account',
+          project_id: credentials.project_id,
+          private_key_id: credentials.private_key_id,
+          private_key: credentials.private_key,
+          client_email: credentials.client_email,
+          client_id: credentials.client_id,
+          auth_uri: credentials.auth_uri,
+          token_uri: credentials.token_uri,
+          auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
+          client_x509_cert_url: credentials.client_x509_cert_url,
         }
       });
 
-      if (response.status === 200) {
-        const data = response.json;
-        if (data.models && data.models.length > 0) {
-          const fetched: string[] = data.models
-            .map((m: any) => m.displayName || m.name)
-            .filter((name: string | undefined): name is string => typeof name === 'string');
-          const unique = [...new Set(fetched)].sort();
-          if (unique.length > 0) {
-            return unique;
-          }
-          throw new Error('Vertex AI returned no models.');
+      const parent = `projects/${projectId}/locations/${location}`;
+
+      // Fetch the list of models using ModelServiceClient
+      const [models] = await client.listModels({ parent });
+
+      if (models && models.length > 0) {
+        const modelNames: string[] = models
+          .map((model: any) => model.displayName || model.name)
+          .filter((name: string | undefined): name is string => typeof name === 'string');
+        
+        const unique = [...new Set(modelNames)].sort();
+        
+        if (unique.length > 0) {
+          return unique;
         }
         throw new Error('Vertex AI returned no models.');
       }
-      throw new Error(`Vertex AI listModels failed with status ${response.status}`);
+      
+      throw new Error('Vertex AI returned no models.');
     } catch (error) {
-      console.error('Mastermind: Failed to list models via API.', error);
+      console.error('Mastermind: Failed to list models via ModelServiceClient.', error);
       throw error;
     }
   }
