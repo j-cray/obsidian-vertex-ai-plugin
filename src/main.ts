@@ -372,7 +372,7 @@ class MastermindSettingTab extends PluginSettingTab {
             btnEl.addClass('is-loading');
             new Notice('Fetching models...');
 
-            const models = await vertex.listModels(true);
+            const models = await vertex.listModels(true, true);
             if (models.length > 0) {
               const dd = this.modelDropdown;
               // @ts-ignore

@@ -82,7 +82,7 @@ export class VertexService {
     }
   }
 
-  async listModels(skipCache = false): Promise<string[]> {
+  async listModels(skipCache = false, includeDocs = false): Promise<string[]> {
     try {
       const projectId = this.getProjectId();
       const location = this.location || 'us-central1';
@@ -187,31 +187,36 @@ export class VertexService {
               }
             });
           }
+        } else {
+          throw new Error(`Publishers API returned status ${response.status}`);
         }
       } catch (error: any) {
         const status = (error?.response as any)?.status;
         console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error, 'URL:', publishersUrl);
+        if (modelNames.length === 0) {
+          throw error;
+        }
       }
 
-      // 3. Scrape the public docs page for published model IDs as a last-mile source
-      try {
-        const docsModels = await this.fetchModelIdsFromDocs(skipCache);
-        docsModels.forEach((m) => {
-          if (!modelNames.includes(m)) {
-            modelNames.push(m);
-          }
-        });
-      } catch (error) {
-        console.warn('Mastermind: Failed to scrape docs for models.', error);
+      // Optionally merge docs scrape when requested (manual fetch button)
+      if (includeDocs) {
+        try {
+          const docsModels = await this.fetchModelIdsFromDocs(skipCache);
+          docsModels.forEach((m) => {
+            if (!modelNames.includes(m)) {
+              modelNames.push(m);
+            }
+          });
+        } catch (error) {
+          console.warn('Mastermind: Failed to scrape docs for models.', error);
+        }
       }
 
-      // Return combined list, deduplicated and sorted
+      // Return combined list, deduplicated and sorted; fail hard if none
       const unique = [...new Set(modelNames)].sort();
-      
       if (unique.length > 0) {
         return unique;
       }
-      
       throw new Error('Vertex AI returned no models from custom registry or publishers.');
     } catch (error) {
       console.error('Mastermind: Failed to list models.', error);
@@ -556,7 +561,8 @@ Then provide your final answer.`;
         }
       ];
 
-      let contents: any[] = [...history];
+      // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
+      let contents: any[] = [];
       const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
 
       for (const img of images) {
