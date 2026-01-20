@@ -635,6 +635,18 @@ Your actual answer here.`;
           const funcCall = part.functionCall;
           const { name, args } = funcCall;
           let result: any;
+          let status: 'success' | 'error' | 'pending' = 'pending';
+
+          // Yield immediately to show the tool is being called
+          yield {
+            text: '',
+            actions: [{
+              tool: name,
+              input: args,
+              status: 'pending'
+            }],
+            isThinking: true
+          };
 
           try {
             if (name === 'list_files') {
@@ -655,9 +667,23 @@ Your actual answer here.`;
             } else if (name === 'list_directory') {
               result = await vaultService.listDirectory(args.path);
             }
+            status = 'success';
           } catch (err: any) {
             result = { status: 'error', message: err.message };
+            status = 'error';
           }
+
+          // Yield again with result
+          yield {
+            text: '',
+            actions: [{
+              tool: name,
+              input: args,
+              output: result,
+              status: status
+            }],
+            isThinking: true
+          };
 
           contents.push(candidate.content);
 

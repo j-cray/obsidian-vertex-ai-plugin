@@ -82,12 +82,31 @@ export class MessageRenderer {
     let thinkingTypewriterInterval: any = null;
     let lastThinkingLength = 0;
     let lastTextRenderTime = 0;
+    let allActions: ToolAction[] = []; // Accumulate all actions
 
     const update = async (response: import('../types').ChatResponse, isFinal: boolean = false) => {
-      // 1. Render Tool Actions
+      // 1. Render Tool Actions (accumulate them)
       if (response.actions && response.actions.length > 0) {
+        // Merge new actions with existing ones
+        for (const newAction of response.actions) {
+          // Check if this action already exists (by tool name and input)
+          const existingIndex = allActions.findIndex(a => 
+            a.tool === newAction.tool && 
+            JSON.stringify(a.input) === JSON.stringify(newAction.input)
+          );
+          
+          if (existingIndex >= 0) {
+            // Update existing action (e.g., status changed from pending to success)
+            allActions[existingIndex] = newAction;
+          } else {
+            // Add new action
+            allActions.push(newAction);
+          }
+        }
+
+        // Re-render all actions
         toolContainer.empty();
-        await this.renderToolActions(toolContainer, response.actions);
+        await this.renderToolActions(toolContainer, allActions);
       }
 
       // 2. Handle Thinking Block with Typewriter Effect
@@ -175,6 +194,7 @@ export class MessageRenderer {
     for (const action of actions) {
       const toolCard = actionContainer.createDiv('tool-action-card');
       if (action.status === 'error') toolCard.addClass('tool-error');
+      if (action.status === 'pending') toolCard.addClass('tool-pending');
 
       // Header
       const header = toolCard.createDiv('tool-header');
@@ -187,12 +207,25 @@ export class MessageRenderer {
         setIcon(iconSpan, 'globe');
       } else if (action.tool === 'generate_image') {
         setIcon(iconSpan, 'palette');
+      } else if (action.tool === 'read_file') {
+        setIcon(iconSpan, 'file-text');
+      } else if (action.tool === 'search_content') {
+        setIcon(iconSpan, 'search');
+      } else if (action.tool === 'create_note') {
+        setIcon(iconSpan, 'file-plus');
+      } else if (action.tool === 'list_files') {
+        setIcon(iconSpan, 'files');
+      } else if (action.tool === 'list_directory') {
+        setIcon(iconSpan, 'folder');
+      } else if (action.tool === 'delete_file') {
+        setIcon(iconSpan, 'trash');
       } else {
         setIcon(iconSpan, 'wrench'); // Default icon
       }
 
       const title = header.createSpan('tool-name');
-      title.innerText = `Used ${action.tool}`;
+      const statusText = action.status === 'pending' ? 'Using' : 'Used';
+      title.innerText = `${statusText} ${action.tool}`;
 
       // Details (Collapsible? For now just simple line)
       const details = toolCard.createDiv('tool-details');

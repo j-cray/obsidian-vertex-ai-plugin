@@ -462,11 +462,29 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    transition: all 0.2s ease;
 }
 
 .tool-action-card.tool-error {
     border-color: var(--text-error);
     background-color: rgba(var(--color-red-rgb), 0.1);
+}
+
+.tool-action-card.tool-pending {
+    border-color: var(--interactive-accent);
+    background-color: rgba(var(--interactive-accent-rgb), 0.05);
+    animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+    0%, 100% {
+        border-color: var(--interactive-accent);
+        opacity: 1;
+    }
+    50% {
+        border-color: var(--text-muted);
+        opacity: 0.7;
+    }
 }
 
 .tool-header {
@@ -489,6 +507,13 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.tool-input-code {
+    background: var(--background-primary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
 }
 
 
