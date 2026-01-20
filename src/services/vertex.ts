@@ -51,11 +51,13 @@ export class VertexService {
     const apiHost = this.getApiHost(this.location || 'us-central1');
 
     // Initialize Vertex AI client with service account credentials and region-aware endpoint
+    // Using skipMetadataServer: true to avoid timeout on non-GCP environments
     this.vertexClient = new VertexAI({
       project: credentials.project_id,
       location: this.location || 'us-central1',
       apiEndpoint: apiHost,
       googleAuth: {
+        skipMetadataServer: true,
         credentials: {
           type: 'service_account',
           project_id: credentials.project_id,
