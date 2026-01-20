@@ -141,7 +141,7 @@ export class VertexService {
 
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
-        const url = `https://${location}-aiplatform.googleapis.com/v1beta/publishers/google/models`;
+        const url = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
         console.log('Mastermind DEBUG: Fetching models from:', url);
         console.log('Mastermind DEBUG: Project ID:', projectId);
         console.log('Mastermind DEBUG: Location:', location);
@@ -315,9 +315,29 @@ export class VertexService {
   private async fetchModelIdsFromDocs(): Promise<string[]> {
     const docsUrl = 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models';
     const ids = new Set<string>();
+    const cacheKey = 'mastermind-model-scrape-cache';
+    const cacheTtlMs = 24 * 60 * 60 * 1000; // 24h
+
+    try {
+      const cached = window.localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { ts: number; models: string[] };
+        if (parsed?.models && Array.isArray(parsed.models) && parsed.ts && Date.now() - parsed.ts < cacheTtlMs) {
+          console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length);
+          return parsed.models;
+        }
+      }
+    } catch (err) {
+      console.warn('Mastermind: Failed to read model cache.', err);
+    }
 
     console.log('Mastermind DEBUG: Docs fetch URL:', docsUrl);
+    const stillRunningTimer = window.setTimeout(() => {
+      console.log('Mastermind DEBUG: Docs scrape still running...');
+    }, 3000);
+
     const response = await requestUrl({ url: docsUrl, method: 'GET' });
+    window.clearTimeout(stillRunningTimer);
     console.log('Mastermind DEBUG: Docs fetch status:', response.status);
 
     if (response.status !== 200) {
@@ -345,7 +365,15 @@ export class VertexService {
       }
     }
 
-    return [...ids];
+    const results = [...ids];
+
+    try {
+      window.localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), models: results }));
+    } catch (err) {
+      console.warn('Mastermind: Failed to write model cache.', err);
+    }
+
+    return results;
   }
 
   async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): Promise<AsyncGenerator<ChatResponse, void, unknown>> {
