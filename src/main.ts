@@ -6,7 +6,7 @@ import {
   Notice,
   DropdownComponent,
 } from "obsidian";
-import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/ChatView";
+import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/chatview";
 import { VertexService } from "./services/vertex";
 
 interface MastermindSettings {

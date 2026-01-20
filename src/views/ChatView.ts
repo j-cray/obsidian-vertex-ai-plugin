@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
 import MastermindPlugin from '../main';
 import { VertexService } from '../services/vertex';
 import { VaultService } from '../services/vault';
-import { MessageRenderer } from './MessageRenderer'; // Import Renderer
+import { MessageRenderer } from './messagerenderer'; // Import Renderer
 import { ToolAction } from '../types';
 
 export const VIEW_TYPE_MASTERMIND = 'mastermind-chat-view';

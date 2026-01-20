@@ -30,7 +30,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian5 = require("obsidian");
 
-// src/views/ChatView.ts
+// src/views/chatview.ts
 var import_obsidian4 = require("obsidian");
 
 // src/services/vertex.ts
@@ -840,7 +840,7 @@ ${text}
   }
 };
 
-// src/views/MessageRenderer.ts
+// src/views/messagerenderer.ts
 var import_obsidian3 = require("obsidian");
 var MessageRenderer = class {
   constructor(app, container) {
@@ -1019,7 +1019,7 @@ var MessageRenderer = class {
   }
 };
 
-// src/views/ChatView.ts
+// src/views/chatview.ts
 var VIEW_TYPE_MASTERMIND = "mastermind-chat-view";
 var MastermindChatView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
