@@ -1,4 +1,4 @@
-import { App, TFile, requestUrl } from 'obsidian';
+import { App, TFile, requestUrl, getAllTags } from 'obsidian';
 
 export class VaultService {
   app: App;
@@ -216,15 +216,203 @@ export class VaultService {
     return filename.replace('.md', ''); // Return ID for persistence
   }
 
+  async listFolder(path: string): Promise<string[]> {
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    if (!folder || !(folder as any).children) {
+      throw new Error(`Folder not found: ${path}`);
+    }
+    return (folder as any).children.map((child: any) => child.path);
+  }
+
+  async moveFile(oldPath: string, newPath: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(oldPath);
+    if (!file) {
+      throw new Error(`File or folder not found: ${oldPath}`);
+    }
+
+    // Ensure parent directory of newPath exists
+    const folders = newPath.split('/').slice(0, -1);
+    if (folders.length > 0) {
+      await this.ensureFoldersExist(folders.join('/'));
+    }
+
+    if (await this.app.vault.adapter.exists(newPath)) {
+      throw new Error(`A file or folder already exists at the destination path: ${newPath}`);
+    }
+
+    await this.app.vault.rename(file, newPath);
+  }
+
   // Improved Implementation: createOrUpdateNote
   async createOrUpdateNote(path: string, content: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) {
       await this.app.vault.modify(file, content);
     } else {
-      // Ensure folders (already handled by ensureFoldersExist usually, but safe to double check)
-      await this.ensureFoldersExist(path.substring(0, path.lastIndexOf('/')));
+      // Ensure folders
+      const lastSlash = path.lastIndexOf('/');
+      if (lastSlash !== -1) {
+        await this.ensureFoldersExist(path.substring(0, lastSlash));
+      }
       await this.app.vault.create(path, content);
     }
+  }
+
+  async writeLog(message: string): Promise<void> {
+    const logPath = 'Mastermind/Logs/debug.md';
+    let currentContent = '';
+    try {
+      currentContent = await this.getFileContent(logPath);
+    } catch {
+      currentContent = '# Mastermind Debug Logs\n\n';
+    }
+    const timestamp = new Date().toISOString();
+    const newContent = `${currentContent}\n[${timestamp}] ${message}\n`;
+    await this.createOrUpdateNote(logPath, newContent);
+  }
+
+  async saveImage(base64Data: string): Promise<string> {
+    const folder = 'Mastermind_Images';
+    await this.ensureFoldersExist(folder);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `Generated-${timestamp}.png`;
+    const filepath = `${folder}/${filename}`;
+
+    const buffer = this.base64ToArrayBuffer(base64Data);
+
+    // Check if file exists (unlikely with timestamp)
+    if (await this.app.vault.adapter.exists(filepath)) {
+      // Logic to handle overwrite/rename if needed, but timestamp should be unique enough
+    }
+
+    await this.app.vault.createBinary(filepath, buffer);
+
+    // Return markdown link
+    return `![Generated Image](${filepath})`;
+  }
+
+  private base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+  async enhanceTextWithLinks(text: string): Promise<string> {
+    const fileNames = await this.getAllFileNames();
+    const sortedNames = Array.from(fileNames).sort((a, b) => b.length - a.length);
+
+    let processedText = text;
+
+    for (const name of sortedNames) {
+      if (name.length < 3) continue;
+      // Regex: negative lookbehind for [[, word boundary, name, word boundary, negative lookahead for ]]
+      const regex = new RegExp(`(?<!\\[\\[)\\b(${this.escapeRegExp(name)})\\b(?!\\]\\])`, 'g');
+      processedText = processedText.replace(regex, '[[$1]]');
+    }
+    return processedText;
+  }
+
+  async appendToNote(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.process(file, (data) => {
+        return data + ((data.endsWith('\n') ? '' : '\n') + content);
+      });
+    } else {
+      throw new Error(`File not found: ${path}`);
+    }
+  }
+
+  async prependToNote(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.process(file, (data) => {
+        // Check for frontmatter
+        const frontmatterRegex = /^---\n[\s\S]*?\n---\n/;
+        const match = data.match(frontmatterRegex);
+        if (match) {
+          // Insert after frontmatter
+          return data.slice(0, match[0].length) + content + '\n' + data.slice(match[0].length);
+        } else {
+          // Insert at start
+          return content + '\n' + data;
+        }
+      });
+    } else {
+      throw new Error(`File not found: ${path}`);
+    }
+  }
+
+  async updateNoteSection(path: string, header: string, newContent: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache || !cache.headings) throw new Error(`No metadata/headings found for ${path}`);
+
+    const targetHeading = cache.headings.find(h => h.heading === header);
+    if (!targetHeading) throw new Error(`Heading "${header}" not found in ${path}`);
+
+    const headings = cache.headings;
+    const targetIndex = headings.indexOf(targetHeading);
+
+    // Find the end of the section
+    // The section ends at the start of the next heading of same or higher level (lower level value)
+    let endLine = -1;
+    for (let i = targetIndex + 1; i < headings.length; i++) {
+      if (headings[i].level <= targetHeading.level) {
+        endLine = headings[i].position.start.line;
+        break;
+      }
+    }
+
+    const content = await this.app.vault.read(file);
+    const lines = content.split('\n');
+
+    const startLine = targetHeading.position.end.line + 1;
+    const actualEndLine = endLine === -1 ? lines.length : endLine;
+
+    // Replace lines
+    const newLines = [
+      ...lines.slice(0, startLine),
+      newContent,
+      ...lines.slice(actualEndLine)
+    ];
+
+    await this.app.vault.modify(file, newLines.join('\n'));
+  }
+
+  async getTags(): Promise<string[]> {
+    const tags = new Set<string>();
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache) {
+        const fileTags = getAllTags(cache);
+        if (fileTags) {
+          fileTags.forEach(t => tags.add(t));
+        }
+      }
+    }
+    return Array.from(tags).sort();
+  }
+
+  async getLinks(path: string): Promise<string[]> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache || !cache.links) return [];
+
+    return cache.links.map(l => l.link);
+  }
+
+  // Helper for internal use if needed
+  private escapeRegExp(string: string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }

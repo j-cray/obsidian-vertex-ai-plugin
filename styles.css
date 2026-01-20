@@ -14,6 +14,11 @@
     height: 100%;
     background: var(--chat-bg);
     font-family: 'Inter', var(--font-interface), sans-serif;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
 }
 
 /* TOOLBAR - Transparent */
@@ -78,6 +83,8 @@
 .chat-messages {
     flex-grow: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
     padding: 60px 20px 20px 20px;
     display: flex;
     flex-direction: column;
@@ -108,7 +115,8 @@
     flex-shrink: 0;
 }
 
-.chat-message {
+.chat-message,
+.chat-message-content {
     padding: 14px 18px;
     border-radius: 16px;
     max-width: 85%;
@@ -121,6 +129,53 @@
     /* Ensure selectable */
     -webkit-user-select: text;
     transition: transform 0.2s ease;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+/* Thinking Process Styles */
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+.thinking-icon {
+    display: flex;
+    align-items: center;
+}
+
+.thinking-content {
+    font-size: 13px;
+    color: var(--text-faint);
+    border-left: 2px solid var(--interactive-accent);
+    padding-left: 12px;
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+    font-style: italic;
+    background: rgba(var(--mono-rgb-100), 0.02);
+    border-radius: 0 4px 4px 0;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+.chat-message pre,
+.chat-message code {
+    white-space: pre-wrap;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+/* Fix flex child overflow */
+.message-ai,
+.message-user {
+    min-width: 0;
+    /* Allows text wrap inside flex item */
 }
 
 /* User Message - Premium Gradient */
@@ -132,10 +187,16 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Fix Visibility of Selection on User Message */
+/* Global Selection Fix */
+::selection {
+    background: rgba(99, 102, 241, 0.3);
+    color: inherit;
+}
+
+/* User Message Selection - High Contrast */
 .message-user ::selection {
-    background: rgba(255, 255, 255, 0.3);
-    color: white;
+    background: rgba(255, 255, 255, 0.4);
+    color: #ffffff;
 }
 
 
@@ -193,6 +254,18 @@
     40% {
         transform: scale(1);
     }
+}
+
+/* Finished Thinking State */
+.thinking-code-block {
+    opacity: 0.6;
+    border-left-color: var(--text-muted);
+}
+
+.thinking-code-block .thinking-content {
+    background: transparent;
+    font-style: normal;
+    color: var(--text-muted);
 }
 
 /* INPUT AREA FIXES */
@@ -269,8 +342,8 @@
     right: 14px;
     top: 50%;
     transform: translateY(-50%);
-    background: transparent;
-    border: none;
+    background: transparent !important;
+    border: none !important;
     width: 32px;
     height: 32px;
     cursor: pointer;
@@ -280,15 +353,20 @@
     color: var(--accent-color);
     padding: 0;
     z-index: 5;
-    box-shadow: none;
-    /* Ensure no shadow/bg */
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-appearance: none;
 }
 
-.chat-send-button:hover {
+.chat-send-button:hover,
+.chat-send-button:focus,
+.chat-send-button:active {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
     transform: translateY(-50%) scale(1.1);
-    /* Keep vertical centering on hover */
     color: var(--text-normal);
-    background: transparent;
+    outline: none !important;
 }
 
 .chat-send-button svg {
@@ -316,4 +394,98 @@
     color: var(--text-normal);
     min-height: 48px;
     line-height: 1.5;
+}
+
+/* THINKING BLOCKS */
+.markdown-preview-view pre.language-thinking,
+.markdown-source-view .cm-line .cm-thinking {
+    background-color: rgba(var(--mono-rgb-100), 0.03) !important;
+    border-left: 3px solid var(--accent-color) !important;
+    border-radius: 4px;
+    padding: 8px 12px !important;
+    color: var(--text-muted) !important;
+    font-style: italic;
+    font-family: 'Inter', var(--font-interface), sans-serif !important;
+    /* Use interface font for thoughts, not code font */
+}
+
+/* Hide the "thinking" language label if possible, or style it */
+.markdown-preview-view pre.language-thinking:before {
+    content: "Thinking Process";
+    display: block;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    color: var(--accent-color);
+    opacity: 0.8;
+}
+
+/* Tool Action Cards */
+.chat-tool-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+.tool-action-card {
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.9em;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tool-action-card.tool-error {
+    border-color: var(--text-error);
+    background-color: rgba(var(--color-red-rgb), 0.1);
+}
+
+.tool-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.tool-icon {
+    display: flex;
+    align-items: center;
+}
+
+.tool-details {
+    color: var(--text-normal);
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Strict Thinking Visuals */
+.thinking-content {
+    display: block;
+    font-family: var(--font-monospace);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    color: var(--text-muted);
+    background-color: var(--background-secondary);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    border-left: 2px solid var(--interactive-accent);
+}
+
+.thinking-code-block {
+    opacity: 0.6;
+    max-height: 100px;
+    overflow-y: auto;
+    border-left: 2px solid var(--text-muted);
 }
