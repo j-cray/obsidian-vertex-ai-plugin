@@ -20,32 +20,6 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  static getFallbackModelsFor(authProvider: string): string[] {
-    if (authProvider === 'aistudio') {
-      return [
-        'gemini-3-pro-preview',
-        'gemini-3-flash-preview',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-pro',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro-002',
-        'gemini-1.5-flash-002',
-        'gemini-1.0-pro'
-      ];
-    }
-    // Default to Vertex AI models
-    return [
-      'gemini-3-pro-preview',
-      'gemini-3-flash-preview',
-      'gemini-2.0-flash-exp',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro-002',
-      'gemini-1.5-flash-002',
-      'gemini-1.0-pro'
-    ];
-  }
-
   updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.serviceAccountJson = settings.serviceAccountJson;
     this.location = settings.location;
@@ -196,28 +170,6 @@ export class VertexService {
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || 'us-central1';
 
-    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
-    // Updated: 2026-01-15
-    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
-    // Updated: 2026-01-15 - Confirmed IDs
-    const FALLBACK_MODELS = [
-      // Gemini 3.0 (Preview)
-      'gemini-3-pro-preview', // Correct ID
-      'gemini-3-flash-preview',
-
-      // Gemini 2.0 (Commonly cited)
-      'gemini-2.0-flash-exp',
-
-      // Gemini 1.5 (Stable)
-      'gemini-1.5-pro',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro-002',
-      'gemini-1.5-flash-002',
-
-      // Legacy
-      'gemini-1.0-pro'
-    ];
-
     try {
       const response = await requestUrl({
         url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
@@ -231,20 +183,20 @@ export class VertexService {
       if (response.status === 200) {
         const data = response.json;
         if (data.models) {
-          const fetched = data.models
-            .map((m: any) => m.name.split('/').pop())
-            .filter((id: string) => id.includes('gemini'));
-
-          if (fetched.length > 0) {
-            // Merge fetched with important fallbacks (dedupe)
-            return [...new Set([...fetched, ...FALLBACK_MODELS])].sort();
+          const fetched: string[] = data.models
+            .map((m: any) => m.name?.split('/').pop())
+            .filter((id: string | undefined): id is string => typeof id === 'string' && id.includes('gemini'));
+          const unique = [...new Set(fetched)].sort();
+          if (unique.length > 0) {
+            return unique;
           }
+          throw new Error('Vertex AI returned no Gemini models.');
         }
       }
-      return FALLBACK_MODELS;
+      throw new Error(`Vertex AI listModels failed with status ${response.status}`);
     } catch (error) {
-      console.error('Mastermind: Failed to list models via API, using comprehensive fallback.', error);
-      return FALLBACK_MODELS;
+      console.error('Mastermind: Failed to list models via API.', error);
+      throw error;
     }
   }
 

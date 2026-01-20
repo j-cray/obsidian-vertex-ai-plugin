@@ -171,19 +171,16 @@ export default class MastermindPlugin extends Plugin {
             new Notice(
               `Mastermind: Auto-fetched ${models.length} ${providerLabel} models.`,
             );
+          } else {
+            new Notice('Mastermind: Model list was empty. Check account permissions.');
           }
         } catch (e) {
-          console.log("Mastermind: Auto-fetch failed silently.");
+          console.error("Mastermind: Failed to auto-fetch models.", e);
+          new Notice('Mastermind: Failed to fetch models. Check credentials or network.');
         }
       }, 2000);
     } else if (this.settings.availableModels.length === 0) {
-      const fallback = VertexService.getFallbackModelsFor(
-        this.settings.authProvider ?? "vertex",
-      );
-      this.settings.availableModels = fallback;
-      if (!fallback.includes(this.settings.modelId) && fallback.length > 0) {
-        this.settings.modelId = fallback[0];
-      }
+      console.log('Mastermind: Model list unavailable; configure credentials to fetch available models.');
     }
   }
 
