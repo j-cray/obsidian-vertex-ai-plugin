@@ -2,6 +2,7 @@ import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
 import { ModelServiceClient } from '@google-cloud/aiplatform';
+import { GoogleAuth } from 'google-auth-library';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -50,26 +51,19 @@ export class VertexService {
 
     const apiHost = this.getApiHost(this.location || 'us-central1');
 
-    // Initialize Vertex AI client with service account credentials and region-aware endpoint
-    // Using skipMetadataServer: true to avoid timeout on non-GCP environments
+    // Create explicit GoogleAuth to bypass metadata server
+    const authClient = new GoogleAuth({
+      credentials: credentials,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+    });
+
+    // Initialize Vertex AI client with explicit auth client
     this.vertexClient = new VertexAI({
       project: credentials.project_id,
       location: this.location || 'us-central1',
       apiEndpoint: apiHost,
-      googleAuth: {
-        skipMetadataServer: true,
-        credentials: {
-          type: 'service_account',
-          project_id: credentials.project_id,
-          private_key_id: credentials.private_key_id,
-          private_key: credentials.private_key,
-          client_email: credentials.client_email,
-          client_id: credentials.client_id,
-          auth_uri: credentials.auth_uri,
-          token_uri: credentials.token_uri,
-          auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
-          client_x509_cert_url: credentials.client_x509_cert_url,
-        }
+      googleAuthOptions: {
+        authClient: authClient as any
       }
     });
 
@@ -456,11 +450,21 @@ Be concise, professional, and insightful.
 Always use the provided context to answer questions if available.
 You can use tools to search, read, list, create, and delete notes/folders in the vault.
 
-IMPORTANT: If you need to reason through a complex problem, show your work by wrapping your thought process in a "thinking" code block, like this:
+CRITICAL: For EVERY response, you MUST show your thinking process first:
+1. Start with a \`\`\`thinking code block
+2. Write your step-by-step reasoning
+3. Close the thinking block
+4. Then provide your final answer
+
+Example format:
 \`\`\`thinking
-My reasoning process...
+Let me break this down:
+1. The user is asking about...
+2. I should consider...
+3. The best approach is...
 \`\`\`
-Then provide your final answer.`;
+
+Your actual answer here.`;
 
       if (this.customContextPrompt) {
         systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;
@@ -658,11 +662,17 @@ Then provide your final answer.`;
         } else if ('text' in part) {
           // Extract thinking blocks and main text
           const fullText = part.text || '';
+          console.log('DEBUG: Full response text:', fullText.substring(0, 200));
+          
           const thinkingMatch = fullText.match(/```thinking\n([\s\S]*?)\n```/);
+          console.log('DEBUG: Thinking match found:', !!thinkingMatch);
           
           if (thinkingMatch) {
             const thinkingText = thinkingMatch[1].trim();
             const mainText = fullText.replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim();
+            
+            console.log('DEBUG: Thinking text:', thinkingText.substring(0, 100));
+            console.log('DEBUG: Main text:', mainText.substring(0, 100));
             
             // Yield thinking block first with streaming indicator
             yield {
@@ -672,6 +682,7 @@ Then provide your final answer.`;
               thinkingText: thinkingText
             };
           } else {
+            console.log('DEBUG: No thinking block found, yielding full text');
             yield {
               text: fullText,
               actions: []
