@@ -126,36 +126,32 @@ export class VertexService {
 
       // 2. Fetch foundational models from Google Publishers via REST API
       try {
-        const client = this.getVertexClient();
-        const accessTokenResp = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            assertion: await this.createJWT(credentialsObj)
-          }).toString()
+        const credentialsObj = {
+          type: 'service_account',
+          project_id: credentials.project_id,
+          private_key_id: credentials.private_key_id,
+          private_key: credentials.private_key,
+          client_email: credentials.client_email,
+          client_id: credentials.client_id,
+          auth_uri: credentials.auth_uri,
+          token_uri: credentials.token_uri,
+          auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
+          client_x509_cert_url: credentials.client_x509_cert_url,
+        };
+
+        const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
+
+        const response = await requestUrl({
+          url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
         });
 
-        if (!accessTokenResp.ok) {
-          throw new Error('Failed to get access token');
-        }
-
-        const tokenData = await accessTokenResp.json() as { access_token: string };
-        const accessToken = tokenData.access_token;
-
-        const response = await fetch(
-          `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
-          {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        if (response.ok) {
-          const data = await response.json() as { models?: Array<{ displayName?: string; name?: string }> };
+        if (response.status === 200) {
+          const data = response.json as { models?: Array<{ displayName?: string; name?: string }> };
           if (data.models && data.models.length > 0) {
             data.models.forEach((model: any) => {
               const name = model.displayName || model.name;
@@ -181,6 +177,24 @@ export class VertexService {
       console.error('Mastermind: Failed to list models.', error);
       throw error;
     }
+  }
+
+  private async getAccessTokenForPublishers(credentials: any): Promise<string> {
+    const jwt = await this.createJWT(credentials);
+
+    const response = await requestUrl({
+      url: 'https://oauth2.googleapis.com/token',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+    });
+
+    if (response.status !== 200) {
+      throw new Error(`Failed to get access token: ${response.text}`);
+    }
+
+    const data = response.json as { access_token: string };
+    return data.access_token;
   }
 
   private async createJWT(credentials: any): Promise<string> {
