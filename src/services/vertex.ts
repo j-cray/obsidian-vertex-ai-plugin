@@ -254,11 +254,17 @@ export class VertexService {
       exp: now + 3600,
       iat: now,
     };
+      } catch (error: any) {
+        const status = (error?.response as any)?.status;
+        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error);
 
-    const encodedHeader = this.base64url(JSON.stringify(header));
-    const encodedClaim = this.base64url(JSON.stringify(claim));
+
+      // 3. Scrape the public docs page for published model IDs as a last-mile source
     const unsignedToken = `${encodedHeader}.${encodedClaim}`;
+        console.log('Mastermind DEBUG: Scraping public docs for model IDs...');
+        const scrapeStart = Date.now();
 
+        console.log('Mastermind DEBUG: Docs scrape found', docsModels.length, 'models in', `${Date.now() - scrapeStart}ms`);
     const signature = await this.sign(unsignedToken, credentials.private_key);
     return `${unsignedToken}.${signature}`;
   }
@@ -267,23 +273,6 @@ export class VertexService {
     let encodedSource: string;
     if (typeof source === "string") {
       const bytes = new TextEncoder().encode(source);
-      encodedSource = this.arrayBufferToBase64(bytes);
-    } else {
-      encodedSource = this.arrayBufferToBase64(source);
-    }
-
-    return encodedSource
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-  }
-
-  private arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
     }
     return window.btoa(binary);
   }
@@ -327,12 +316,17 @@ export class VertexService {
     const docsUrl = 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models';
     const ids = new Set<string>();
 
+    console.log('Mastermind DEBUG: Docs fetch URL:', docsUrl);
     const response = await requestUrl({ url: docsUrl, method: 'GET' });
+    console.log('Mastermind DEBUG: Docs fetch status:', response.status);
+
     if (response.status !== 200) {
+      console.warn('Mastermind: Docs fetch non-200 status', response.status);
       return [];
     }
 
     const body = response.text || JSON.stringify(response.json ?? '');
+    console.log('Mastermind DEBUG: Docs fetch body length:', body.length);
 
     const patterns = [
       /(?:models\/|model-id=|modelId=|model:|["'`>])([a-z0-9][\w.\-]{2,})/gi,
