@@ -1,7 +1,7 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
-import { ModelServiceClient } from '@google-cloud/aiplatform';
+import { ModelServiceClient, ModelGardenServiceClient } from '@google-cloud/aiplatform';
 
 export class VertexService {
   private serviceAccountJson!: string;
@@ -79,7 +79,7 @@ export class VertexService {
       const projectId = this.getProjectId();
       const location = this.location || 'us-central1';
 
-      // Initialize ModelServiceClient with service account credentials
+      // Parse credentials once
       let credentials;
       try {
         credentials = JSON.parse(this.serviceAccountJson);
@@ -87,43 +87,75 @@ export class VertexService {
         throw new Error('Invalid Service Account JSON format.');
       }
 
-      const client = new ModelServiceClient({
-        apiEndpoint: `${location}-aiplatform.googleapis.com`,
-        credentials: {
-          type: 'service_account',
-          project_id: credentials.project_id,
-          private_key_id: credentials.private_key_id,
-          private_key: credentials.private_key,
-          client_email: credentials.client_email,
-          client_id: credentials.client_id,
-          auth_uri: credentials.auth_uri,
-          token_uri: credentials.token_uri,
-          auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
-          client_x509_cert_url: credentials.client_x509_cert_url,
+      const credentialsObj = {
+        type: 'service_account',
+        project_id: credentials.project_id,
+        private_key_id: credentials.private_key_id,
+        private_key: credentials.private_key,
+        client_email: credentials.client_email,
+        client_id: credentials.client_id,
+        auth_uri: credentials.auth_uri,
+        token_uri: credentials.token_uri,
+        auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
+        client_x509_cert_url: credentials.client_x509_cert_url,
+      };
+
+      const modelNames: string[] = [];
+
+      // 1. Try to fetch custom-deployed models from Model Registry
+      try {
+        const modelClient = new ModelServiceClient({
+          apiEndpoint: `${location}-aiplatform.googleapis.com`,
+          credentials: credentialsObj
+        });
+
+        const parent = `projects/${projectId}/locations/${location}`;
+        const [customModels] = await modelClient.listModels({ parent });
+
+        if (customModels && customModels.length > 0) {
+          customModels.forEach((model: any) => {
+            const name = model.displayName || model.name;
+            if (typeof name === 'string' && !modelNames.includes(name)) {
+              modelNames.push(name);
+            }
+          });
         }
-      });
+      } catch (error) {
+        console.warn('Mastermind: Failed to fetch custom models from Model Registry.', error);
+      }
 
-      const parent = `projects/${projectId}/locations/${location}`;
+      // 2. Fetch foundational models from Model Garden (Gemini, PaLM, etc.)
+      try {
+        const gardenClient = new ModelGardenServiceClient({
+          apiEndpoint: `${location}-aiplatform.googleapis.com`,
+          credentials: credentialsObj
+        });
 
-      // Fetch the list of models using ModelServiceClient
-      const [models] = await client.listModels({ parent });
+        const gardenParent = `projects/${projectId}/locations/${location}`;
+        const [gardenModels] = await gardenClient.listPublicModels({ parent: gardenParent });
 
-      if (models && models.length > 0) {
-        const modelNames: string[] = models
-          .map((model: any) => model.displayName || model.name)
-          .filter((name: string | undefined): name is string => typeof name === 'string');
-        
-        const unique = [...new Set(modelNames)].sort();
-        
-        if (unique.length > 0) {
-          return unique;
+        if (gardenModels && gardenModels.length > 0) {
+          gardenModels.forEach((model: any) => {
+            const name = model.displayName || model.name;
+            if (typeof name === 'string' && !modelNames.includes(name)) {
+              modelNames.push(name);
+            }
+          });
         }
-        throw new Error('Vertex AI returned no models.');
+      } catch (error) {
+        console.warn('Mastermind: Failed to fetch foundational models from Model Garden.', error);
+      }
+
+      // Return combined list, deduplicated and sorted
+      const unique = [...new Set(modelNames)].sort();
+      
+      if (unique.length > 0) {
+        return unique;
       }
       
-      throw new Error('Vertex AI returned no models.');
+      throw new Error('Vertex AI returned no models from custom registry or publishers.');
     } catch (error) {
-      console.error('Mastermind: Failed to list models via ModelServiceClient.', error);
+      console.error('Mastermind: Failed to list models.', error);
       throw error;
     }
   }
