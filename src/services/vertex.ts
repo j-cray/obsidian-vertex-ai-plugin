@@ -141,13 +141,14 @@ export class VertexService {
 
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
-        // Use v1 API with correct publisher models endpoint
+        // Use v1beta1 API with wildcard publisher path and x-goog-user-project header
         const response = await requestUrl({
-          url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+          url: `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/*/models`,
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-user-project': projectId
           }
         });
 
