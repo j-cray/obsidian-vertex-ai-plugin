@@ -141,9 +141,15 @@ export class VertexService {
 
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
+        const url = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
+        console.log('Mastermind DEBUG: Fetching models from:', url);
+        console.log('Mastermind DEBUG: Project ID:', projectId);
+        console.log('Mastermind DEBUG: Location:', location);
+        console.log('Mastermind DEBUG: Service Account:', credentials.client_email);
+
         // Use v1beta1 API with specific google publisher and x-goog-user-project header
         const response = await requestUrl({
-          url: `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`,
+          url,
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -151,6 +157,8 @@ export class VertexService {
             'x-goog-user-project': projectId
           }
         });
+
+        console.log('Mastermind DEBUG: Response status:', response.status);
 
         if (response.status === 200) {
           const data = response.json as { models?: Array<{ displayName?: string; name?: string; model?: string }> };
