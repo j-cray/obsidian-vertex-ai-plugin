@@ -125,6 +125,7 @@ export class VertexService {
       }
 
       // 2. Try to fetch foundational models from Google Publishers
+      const publishersUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
       try {
         const credentialsObj = {
           type: 'service_account',
@@ -141,15 +142,14 @@ export class VertexService {
 
         const accessToken = await this.getAccessTokenForPublishers(credentialsObj);
 
-        const url = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
-        console.log('Mastermind DEBUG: Fetching models from (v1beta1):', url);
+        console.log('Mastermind DEBUG: Fetching models from (v1beta1):', publishersUrl);
         console.log('Mastermind DEBUG: Project ID:', projectId);
         console.log('Mastermind DEBUG: Location:', location);
         console.log('Mastermind DEBUG: Service Account:', credentials.client_email);
 
-        // Use v1beta API with specific google publisher and x-goog-user-project header
+        // Use v1beta1 API with specific google publisher and x-goog-user-project header
         const response = await requestUrl({
-          url,
+          url: publishersUrl,
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -179,8 +179,9 @@ export class VertexService {
             });
           }
         }
-      } catch (error) {
-        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', error);
+      } catch (error: any) {
+        const status = (error?.response as any)?.status;
+        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error, 'URL:', publishersUrl);
       }
 
       // 3. Scrape the public docs page for published model IDs as a last-mile source
@@ -194,23 +195,6 @@ export class VertexService {
       } catch (error) {
         console.warn('Mastermind: Failed to scrape docs for models.', error);
       }
-
-      // 4. Add known foundational models as fallback
-      const knownFoundationalModels = [
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-pro',
-        'gemini-1.5-flash',
-        'gemini-1.0-pro',
-        'text-bison',
-        'text-bison-32k',
-      ];
-
-      knownFoundationalModels.forEach(model => {
-        if (!modelNames.includes(model)) {
-          modelNames.push(model);
-        }
-      });
 
       // Return combined list, deduplicated and sorted
       const unique = [...new Set(modelNames)].sort();
@@ -245,36 +229,32 @@ export class VertexService {
   }
 
   private async createJWT(credentials: any): Promise<string> {
-    const header = { alg: "RS256", typ: "JWT" };
+    const header = { alg: 'RS256', typ: 'JWT' };
     const now = Math.floor(Date.now() / 1000);
     const claim = {
       iss: credentials.client_email,
-      scope: "https://www.googleapis.com/auth/cloud-platform",
-      aud: "https://oauth2.googleapis.com/token",
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      aud: 'https://oauth2.googleapis.com/token',
       exp: now + 3600,
       iat: now,
     };
-      } catch (error: any) {
-        const status = (error?.response as any)?.status;
-        console.warn('Mastermind: Failed to fetch foundational models from Publishers API.', status ? `Status ${status}` : error, 'URL:', url);
 
-
-      // 3. Scrape the public docs page for published model IDs as a last-mile source
+    const encodedHeader = this.base64url(JSON.stringify(header));
+    const encodedClaim = this.base64url(JSON.stringify(claim));
     const unsignedToken = `${encodedHeader}.${encodedClaim}`;
-        console.log('Mastermind DEBUG: Scraping public docs for model IDs...');
-        const scrapeStart = Date.now();
-
-        console.log('Mastermind DEBUG: Docs scrape found', docsModels.length, 'models in', `${Date.now() - scrapeStart}ms`);
     const signature = await this.sign(unsignedToken, credentials.private_key);
     return `${unsignedToken}.${signature}`;
   }
 
   private base64url(source: string | ArrayBuffer): string {
-    let encodedSource: string;
-    if (typeof source === "string") {
-      const bytes = new TextEncoder().encode(source);
+    let input: Uint8Array;
+    if (typeof source === 'string') {
+      input = new TextEncoder().encode(source);
+    } else {
+      input = new Uint8Array(source);
     }
-    return window.btoa(binary);
+    const base64 = window.btoa(String.fromCharCode(...input));
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
   private async sign(data: string, privateKeyPem: string): Promise<string> {
@@ -334,13 +314,14 @@ export class VertexService {
     console.log('Mastermind DEBUG: Cache miss or stale; starting docs scrape.');
 
     console.log('Mastermind DEBUG: Docs fetch URL:', docsUrl);
+    const scrapeStart = Date.now();
     const stillRunningTimer = window.setTimeout(() => {
-      console.log('Mastermind DEBUG: Docs scrape still running...');
+      console.log('Mastermind DEBUG: Docs scrape still running...', 'elapsed(ms):', Date.now() - scrapeStart);
     }, 3000);
 
     const response = await requestUrl({ url: docsUrl, method: 'GET' });
     window.clearTimeout(stillRunningTimer);
-    console.log('Mastermind DEBUG: Docs fetch status:', response.status);
+    console.log('Mastermind DEBUG: Docs fetch status:', response.status, 'elapsed(ms):', Date.now() - scrapeStart);
 
     if (response.status !== 200) {
       console.warn('Mastermind: Docs fetch non-200 status', response.status);
@@ -348,7 +329,7 @@ export class VertexService {
     }
 
     const body = response.text || JSON.stringify(response.json ?? '');
-    console.log('Mastermind DEBUG: Docs fetch body length:', body.length);
+    console.log('Mastermind DEBUG: Docs fetch body length:', body.length, 'elapsed(ms):', Date.now() - scrapeStart);
 
     const patterns = [
       /(?:models\/|model-id=|modelId=|model:|["'`>])([a-z0-9][\w.\-]{2,})/gi,
@@ -368,9 +349,11 @@ export class VertexService {
     }
 
     const results = [...ids];
+    console.log('Mastermind DEBUG: Docs models extracted:', results.length, 'elapsed(ms):', Date.now() - scrapeStart);
 
     try {
       window.localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), models: results }));
+      console.log('Mastermind DEBUG: Docs models cached:', results.length, 'elapsed(ms):', Date.now() - scrapeStart);
     } catch (err) {
       console.warn('Mastermind: Failed to write model cache.', err);
     }
