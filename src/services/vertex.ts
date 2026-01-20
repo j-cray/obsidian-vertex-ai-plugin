@@ -11,6 +11,11 @@ export class VertexService {
   private customContextPrompt: string = '';
   private vertexClient: VertexAI | null = null;
 
+  private getApiHost(location: string): string {
+    const loc = location || 'us-central1';
+    return loc === 'global' ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
+  }
+
   constructor(settings: any) {
     this.updateSettings(settings);
   }
@@ -43,10 +48,13 @@ export class VertexService {
       throw new Error('Service Account JSON missing project_id.');
     }
 
-    // Initialize Vertex AI client with service account credentials
+    const apiHost = this.getApiHost(this.location || 'us-central1');
+
+    // Initialize Vertex AI client with service account credentials and region-aware endpoint
     this.vertexClient = new VertexAI({
       project: credentials.project_id,
       location: this.location || 'us-central1',
+      apiEndpoint: apiHost,
       googleAuth: {
         credentials: {
           type: 'service_account',
@@ -78,6 +86,7 @@ export class VertexService {
     try {
       const projectId = this.getProjectId();
       const location = this.location || 'us-central1';
+      const apiHost = this.getApiHost(location);
 
       // Parse credentials once
       let credentials;
@@ -105,7 +114,7 @@ export class VertexService {
       // 1. Try to fetch custom-deployed models from Model Registry
       try {
         const modelClient = new ModelServiceClient({
-          apiEndpoint: `${location}-aiplatform.googleapis.com`,
+          apiEndpoint: apiHost,
           credentials: credentialsObj
         });
 
@@ -125,7 +134,7 @@ export class VertexService {
       }
 
       // 2. Try to fetch foundational models from Google Publishers
-      const publishersUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
+      const publishersUrl = `https://${apiHost}/v1beta1/publishers/google/models`;
       try {
         const credentialsObj = {
           type: 'service_account',
