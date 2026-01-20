@@ -463,31 +463,7 @@ export class VertexService {
         model: modelId,
       });
 
-      let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
-You have access to the user's notes and knowledge vault.
-Be concise, professional, and insightful.
-Always use the provided context to answer questions if available.
-You can use tools to search, read, list, create, and delete notes/folders in the vault.
-
-CRITICAL: For EVERY response, you MUST show your thinking process first:
-1. Start with a \`\`\`thinking code block
-2. Write your step-by-step reasoning
-3. Close the thinking block
-4. Then provide your final answer
-
-Example format:
-\`\`\`thinking
-Let me break this down:
-1. The user is asking about...
-2. I should consider...
-3. The best approach is...
-\`\`\`
-
-Your actual answer here.`;
-
-      if (this.customContextPrompt) {
-        systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;
-      }
+      const systemInstructionText = this.customContextPrompt || '';
 
       const functionDeclarations: any[] = [
         {
@@ -627,7 +603,7 @@ Your actual answer here.`;
 
       contents.push({ role: 'user', parts });
 
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 25; i++) {
         if (signal?.aborted) {
           return;
         }
