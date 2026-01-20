@@ -746,3 +746,7 @@ Your actual answer here.`;
     }
   }
 }
+          
+          // Continue to next iteration to get model's response to the tool result
+          console.log('DEBUG: Tool executed, continuing to get model response...');
+          continue;
