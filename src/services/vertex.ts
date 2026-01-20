@@ -74,7 +74,7 @@ export class VertexService {
     }
   }
 
-  async listModels(): Promise<string[]> {
+  async listModels(skipCache = false): Promise<string[]> {
     try {
       const projectId = this.getProjectId();
       const location = this.location || 'us-central1';
@@ -186,7 +186,7 @@ export class VertexService {
 
       // 3. Scrape the public docs page for published model IDs as a last-mile source
       try {
-        const docsModels = await this.fetchModelIdsFromDocs();
+        const docsModels = await this.fetchModelIdsFromDocs(skipCache);
         docsModels.forEach((m) => {
           if (!modelNames.includes(m)) {
             modelNames.push(m);
@@ -292,26 +292,28 @@ export class VertexService {
     return this.base64url(signature);
   }
 
-  private async fetchModelIdsFromDocs(): Promise<string[]> {
+  private async fetchModelIdsFromDocs(skipCache = false): Promise<string[]> {
     const indexUrl = 'https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models';
     const ids = new Set<string>();
     const cacheKey = 'mastermind-model-scrape-cache';
     const cacheTtlMs = 24 * 60 * 60 * 1000; // 24h
 
-    try {
-      const cached = window.localStorage.getItem(cacheKey);
-      if (cached) {
+    if (!skipCache) {
+      try {
+        const cached = window.localStorage.getItem(cacheKey);
+        if (cached) {
         const parsed = JSON.parse(cached) as { ts: number; models: string[] };
         if (parsed?.models && Array.isArray(parsed.models) && parsed.ts && Date.now() - parsed.ts < cacheTtlMs) {
-          console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length, 'age(ms):', Date.now() - parsed.ts);
-          return parsed.models;
+            console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length, 'age(ms):', Date.now() - parsed.ts);
+            return parsed.models;
+          }
         }
+      } catch (err) {
+        console.warn('Mastermind: Failed to read model cache.', err);
       }
-    } catch (err) {
-      console.warn('Mastermind: Failed to read model cache.', err);
     }
 
-    console.log('Mastermind DEBUG: Cache miss or stale; starting docs scrape.');
+    console.log(skipCache ? 'Mastermind DEBUG: Cache skipped; starting fresh docs scrape.' : 'Mastermind DEBUG: Cache miss or stale; starting docs scrape.');
 
     const scrapeStart = Date.now();
     const stillRunningTimer = window.setTimeout(() => {
@@ -319,79 +321,58 @@ export class VertexService {
     }, 3000);
 
     try {
-      // Fetch index page
-      console.log('Mastermind DEBUG: Fetching index page:', indexUrl);
-      const indexResponse = await requestUrl({ url: indexUrl, method: 'GET' });
+      console.log('Mastermind DEBUG: Fetching models page:', indexUrl);
+      const response = await requestUrl({ url: indexUrl, method: 'GET' });
       
-      if (indexResponse.status !== 200) {
-        console.warn('Mastermind: Index fetch non-200 status', indexResponse.status);
+      if (response.status !== 200) {
+        console.warn('Mastermind: Models page fetch non-200 status', response.status);
         window.clearTimeout(stillRunningTimer);
         return [];
       }
 
-      const indexBody = indexResponse.text || '';
-      console.log('Mastermind DEBUG: Index page body length:', indexBody.length, 'elapsed(ms):', Date.now() - scrapeStart);
+      const body = response.text || '';
+      console.log('Mastermind DEBUG: Models page body length:', body.length, 'elapsed(ms):', Date.now() - scrapeStart);
 
-      // Find model page links
-      const modelPageLinks = new Set<string>();
-      const linkPattern = /href=["']([^"']*\/vertex-ai\/generative-ai\/docs\/(?:learn\/)?models\/[^"'#]+)["']/gi;
-      let linkMatch: RegExpExecArray | null;
+      // Extract model names from headings and text
+      // Pattern 1: Model names in headings (e.g., "Gemini 2.5 Pro" -> gemini-2.5-pro)
+      const headingPattern = /<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi;
+      let headingMatch: RegExpExecArray | null;
       
-      while ((linkMatch = linkPattern.exec(indexBody)) !== null) {
-        let url = linkMatch[1];
-        // Normalize URL
-        if (url.startsWith('/')) {
-          url = 'https://cloud.google.com' + url;
-        } else if (!url.startsWith('http')) {
-          url = 'https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models/' + url;
-        }
-        
-        // Skip the index page itself
-        if (!url.endsWith('/models') && !url.endsWith('/learn/models')) {
-          modelPageLinks.add(url);
+      while ((headingMatch = headingPattern.exec(body)) !== null) {
+        const headingText = headingMatch[1]?.replace(/<[^>]+>/g, '').trim();
+        if (headingText) {
+          // Convert heading like "Gemini 2.5 Pro" to "gemini-2.5-pro"
+          const normalized = headingText
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w.-]/g, '')
+            .replace(/^-+|-+$/g, '');
+          
+          // Check if it looks like a model name (contains letters and numbers/dots/hyphens)
+          if (normalized.length >= 5 && /[a-z]/.test(normalized) && /[0-9]/.test(normalized) && /[-.]/.test(normalized)) {
+            ids.add(normalized);
+          }
         }
       }
 
-      console.log('Mastermind DEBUG: Found model page links:', modelPageLinks.size);
+      // Pattern 2: Model IDs in code blocks or API references
+      const codePatterns = [
+        /<code[^>]*>([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)<\/code>/gi,
+        /publishers\/google\/models\/([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)/gi,
+        /["']?model["']?\s*[:=]\s*["']([a-z][a-z0-9]*(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|lite|fast|ultra|image|generate|live|api))?)["']/gi,
+      ];
 
-      // Fetch each model page and extract IDs
-      let fetchedPages = 0;
-      for (const pageUrl of Array.from(modelPageLinks).slice(0, 50)) { // Limit to 50 pages
-        try {
-          const pageResponse = await requestUrl({ url: pageUrl, method: 'GET', throw: false });
-          if (pageResponse.status === 200) {
-            const pageBody = pageResponse.text || '';
-            fetchedPages++;
-            
-            // Extract model IDs from page - look for patterns like gemini-2.0-flash, gemini-1.5-pro, etc.
-            const modelIdPatterns = [
-              // Match code blocks with model IDs
-              /<code[^>]*>([a-z0-9]+(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|latest))?)<\/code>/gi,
-              // Match in model: property
-              /["']?model["']?\s*[:=]\s*["']([a-z0-9]+(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|latest))?)["']/gi,
-              // Match publishers path format
-              /publishers\/google\/models\/([a-z0-9]+(?:[-\.][a-z0-9]+)+(?:-(?:preview|exp|experimental|latest))?)/gi,
-            ];
-
-            for (const pattern of modelIdPatterns) {
-              let match: RegExpExecArray | null;
-              while ((match = pattern.exec(pageBody)) !== null) {
-                const candidate = match[1]?.trim();
-                if (candidate && candidate.length >= 5 && candidate.length <= 80) {
-                  // Must contain at least one hyphen or dot and start with letter
-                  if (/^[a-z]/.test(candidate) && /[-.]/.test(candidate)) {
-                    ids.add(candidate);
-                  }
-                }
-              }
+      for (const pattern of codePatterns) {
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(body)) !== null) {
+          const candidate = match[1]?.trim().toLowerCase();
+          if (candidate && candidate.length >= 5 && candidate.length <= 80) {
+            if (/^[a-z]/.test(candidate) && /[-.]/.test(candidate)) {
+              ids.add(candidate);
             }
           }
-        } catch (err) {
-          console.warn('Mastermind: Failed to fetch model page:', pageUrl, err);
         }
       }
-
-      console.log('Mastermind DEBUG: Fetched', fetchedPages, 'model pages');
 
     } catch (err) {
       console.warn('Mastermind: Docs scrape error:', err);
@@ -399,7 +380,7 @@ export class VertexService {
       window.clearTimeout(stillRunningTimer);
     }
 
-    const results = [...ids];
+    const results = [...ids].sort();
     console.log('Mastermind DEBUG: Docs models extracted:', results.length, 'elapsed(ms):', Date.now() - scrapeStart);
 
     try {
