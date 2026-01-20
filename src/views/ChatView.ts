@@ -249,6 +249,12 @@ export class MastermindChatView extends ItemView {
     try {
       this.vertexService.updateSettings(this.plugin.settings);
 
+      console.log('DEBUG: vertexService type:', typeof this.vertexService);
+      console.log('DEBUG: vertexService.chat type:', typeof this.vertexService.chat);
+      console.log('DEBUG: vertexService.chat:', this.vertexService.chat);
+      console.log('DEBUG: vertexService keys:', Object.keys(this.vertexService));
+      console.log('DEBUG: vertexService prototype:', Object.getPrototypeOf(this.vertexService));
+
       const context = await this.vaultService.getRelevantContext(message);
       const images = await this.vaultService.getActiveNoteImages();
 
