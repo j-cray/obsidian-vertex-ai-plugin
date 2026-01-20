@@ -1,58 +1,16 @@
-import { App, TFile, requestUrl, Notice } from "obsidian";
-import { ChatResponse, ToolAction } from "../types";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { App, TFile, requestUrl, Notice } from 'obsidian';
+import { ChatResponse, ToolAction } from '../types';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
 export class VertexService {
-  private authProvider!: "vertex" | "aistudio";
   private serviceAccountJson!: string;
   private aiStudioKey!: string;
   private location!: string;
   private modelId!: string;
-  private maxOutputTokens: number = 8192;
-  private temperature: number = 0.7;
-  private customContextPrompt: string = "";
-  private availableModels: string[] = [];
-
-  public static readonly VERTEX_FALLBACK_MODELS = [
-    "gemini-2.0-flash-001",
-    "gemini-2.0-flash-lite-preview-02-05",
-    "gemini-2.0-pro-exp-02-05",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.0-flash-thinking-exp-01-21",
-    "imagen-3.0-generate-001",
-    "imagen-3.0-fast-generate-001",
-  ];
-  public static readonly AI_STUDIO_FALLBACK_MODELS = [
-    "gemini-2.0-flash-001",
-    "gemini-2.0-flash-lite-preview-02-05",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-    "gemini-2.0-pro-exp-02-05",
-    "gemini-2.0-flash-thinking-exp-01-21",
-  ];
-
-  public static getFallbackModelsFor(
-    provider: "vertex" | "aistudio",
-  ): string[] {
-    return provider === "aistudio"
-      ? [...VertexService.AI_STUDIO_FALLBACK_MODELS]
-      : [...VertexService.VERTEX_FALLBACK_MODELS];
-  }
-  // Permissions
-  private permVaultRead: boolean = true;
-  private permVaultWrite: boolean = true;
-  private permVaultDelete: boolean = false;
-  private permWeb: boolean = true;
-  private permTerminal: boolean = false;
-  private confirmVaultDestructive: boolean = true;
-  private confirmTerminalDestructive: boolean = true;
-  // Token management (Vertex AI only)
+  private customContextPrompt: string = '';
   private accessToken: string | null = null;
   private tokenExpiry: number = 0;
   private isRefreshingToken: boolean = false;
@@ -62,25 +20,11 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: any) {
-    this.authProvider = settings.authProvider ?? "vertex";
+  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
     this.serviceAccountJson = settings.serviceAccountJson;
-    this.aiStudioKey = settings.aiStudioKey ?? "";
     this.location = settings.location;
     this.modelId = settings.modelId;
     this.customContextPrompt = settings.customContextPrompt;
-    this.availableModels = settings.availableModels ?? [];
-    this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
-    this.temperature = settings.temperature ?? 0.7;
-    // Permissions
-    this.permVaultRead = settings.permVaultRead ?? true;
-    this.permVaultWrite = settings.permVaultWrite ?? true;
-    this.permVaultDelete = settings.permVaultDelete ?? false;
-    this.permWeb = settings.permWeb ?? true;
-    this.permTerminal = settings.permTerminal ?? false;
-    this.confirmVaultDestructive = settings.confirmVaultDestructive ?? true;
-    this.confirmTerminalDestructive =
-      settings.confirmTerminalDestructive ?? true;
     this.accessToken = null; // Reset token on settings change
   }
 
@@ -89,60 +33,41 @@ export class VertexService {
       return this.accessToken;
     }
 
-    if (this.isRefreshingToken && this.tokenRefreshPromise) {
-      return this.tokenRefreshPromise;
+    if (!this.serviceAccountJson) {
+      throw new Error('Service Account JSON not configured.');
     }
 
-    this.isRefreshingToken = true;
-    this.tokenRefreshPromise = (async () => {
-      try {
-        if (!this.serviceAccountJson) {
-          throw new Error("Service Account JSON not configured.");
-        }
+    let credentials;
+    try {
+      credentials = JSON.parse(this.serviceAccountJson);
+    } catch (e) {
+      throw new Error('Invalid Service Account JSON format.');
+    }
 
-        let credentials;
-        try {
-          credentials = JSON.parse(this.serviceAccountJson);
-        } catch (e) {
-          throw new Error("Invalid Service Account JSON format.");
-        }
+    if (!credentials.client_email || !credentials.private_key) {
+      throw new Error('Service Account JSON missing client_email or private_key.');
+    }
 
-        if (!credentials.client_email || !credentials.private_key) {
-          throw new Error(
-            "Service Account JSON missing client_email or private_key.",
-          );
-        }
+    const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
 
-        const token = await this.createSignedJWT(
-          credentials.client_email,
-          credentials.private_key,
-        );
+    // Exchange JWT for Access Token
+    const response = await requestUrl({
+      url: 'https://oauth2.googleapis.com/token',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
+    });
 
-        // Exchange JWT for Access Token
-        const response = await requestUrl({
-          url: "https://oauth2.googleapis.com/token",
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`,
-        });
+    if (response.status !== 200) {
+      throw new Error(`Failed to refresh token: ${response.text}`);
+    }
 
-        if (response.status !== 200) {
-          throw new Error(`Failed to refresh token: ${response.text}`);
-        }
+    const data = response.json;
+    this.accessToken = data.access_token;
+    // Set expiry to slightly less than 3600s to be safe
+    this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
 
-        const data = response.json;
-        this.accessToken = data.access_token;
-        // Set expiry to slightly less than 3600s to be safe
-        this.tokenExpiry = Date.now() + (data.expires_in - 120) * 1000;
-
-        return this.accessToken!;
-      } finally {
-        this.isRefreshingToken = false;
-        this.tokenRefreshPromise = null;
-      }
-    })();
-
-    return this.tokenRefreshPromise;
+    return this.accessToken!;
   }
 
   private async createSignedJWT(
@@ -231,503 +156,179 @@ export class VertexService {
     try {
       return JSON.parse(this.serviceAccountJson).project_id;
     } catch (e) {
-      return "";
+      return '';
     }
   }
 
   private getBaseUrl(location: string): string {
-    const host =
-      location === "global"
-        ? "aiplatform.googleapis.com"
-        : `${location}-aiplatform.googleapis.com`;
+    const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
     return `https://${host}/v1/projects/${this.getProjectId()}/locations/${location}`;
   }
 
-  private getProviderFallbackModels(): string[] {
-    return VertexService.getFallbackModelsFor(this.authProvider);
-  }
-
-  private mergeModelLists(primary: string[], fallback: string[]): string[] {
-    const merged = [...primary];
-    fallback.forEach((model) => {
-      if (!merged.includes(model)) {
-        merged.push(model);
-      }
-    });
-    return merged;
-  }
-
-  private setAvailableModelList(models: string[]): string[] {
-    const unique = Array.from(new Set(models.filter(Boolean)));
-    this.availableModels = unique;
-    if (unique.length > 0 && !unique.includes(this.modelId)) {
-      this.modelId = unique[0];
-    }
-    return unique;
-  }
-
-  private ensureModelSelection(): string {
-    if (!this.availableModels || this.availableModels.length === 0) {
-      this.availableModels = this.getProviderFallbackModels();
-    }
-    if (!this.modelId || !this.availableModels.includes(this.modelId)) {
-      const fallback = this.getProviderFallbackModels();
-      this.modelId =
-        this.availableModels[0] ||
-        fallback[0] ||
-        VertexService.VERTEX_FALLBACK_MODELS[0];
-    }
-    return this.modelId;
-  }
-
   async listModels(): Promise<string[]> {
-    if (this.authProvider === "aistudio") {
-      const fallback = this.getProviderFallbackModels();
-      if (!this.aiStudioKey) {
-        new Notice(
-          "Mastermind: AI Studio API key missing. Using default model list.",
-        );
-        return this.setAvailableModelList(fallback);
-      }
-
-      try {
-        const collected: string[] = [];
-        let pageToken: string | undefined;
-
-        do {
-          const url = new URL(
-            "https://generativelanguage.googleapis.com/v1beta/models",
-          );
-          url.searchParams.set("pageSize", "100");
-          url.searchParams.set("key", this.aiStudioKey);
-          if (pageToken) {
-            url.searchParams.set("pageToken", pageToken);
-          }
-
-          const response = await requestUrl({
-            url: url.toString(),
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": this.aiStudioKey,
-            },
-          });
-
-          if (response.status !== 200 || !Array.isArray(response.json.models)) {
-            console.warn(
-              `Mastermind: AI Studio list models returned status ${response.status}`,
-            );
-            break;
-          }
-
-          response.json.models.forEach((model: any) => {
-            const name = model.name?.split("/").pop();
-            const supportsContent = Array.isArray(
-              model.supportedGenerationMethods,
-            )
-              ? model.supportedGenerationMethods.some((method: string) =>
-                  [
-                    "generateContent",
-                    "generateMessage",
-                    "streamGenerateContent",
-                  ].includes(method),
-                )
-              : true;
-
-            if (
-              name &&
-              !name.includes("embedding") &&
-              !name.includes("moderation") &&
-              supportsContent
-            ) {
-              collected.push(name);
-            }
-          });
-
-          pageToken = response.json.nextPageToken;
-        } while (pageToken);
-
-        const merged =
-          collected.length > 0
-            ? this.mergeModelLists(collected, fallback)
-            : fallback;
-        new Notice(`Mastermind: AI Studio models ready (${merged.length}).`);
-        return this.setAvailableModelList(merged);
-      } catch (error) {
-        console.error("Mastermind: Error fetching AI Studio models", error);
-      }
-
-      new Notice(
-        "Mastermind: AI Studio model discovery failed. Using defaults.",
-      );
-      return this.setAvailableModelList(fallback);
-    }
-
     const accessToken = await this.getAccessToken();
-    const projectId = this.getProjectId();
-
-    // Default discovery location to us-central1 if global/undefined, as Model Garden is centralized there
-    const discoveryLocation =
-      this.location === "global" || !this.location
-        ? "us-central1"
-        : this.location;
-
-    new Notice(
-      `Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`,
-    );
-
-    const fallbackModels = this.getProviderFallbackModels();
-
-    const foundModels: Set<string> = new Set();
-
-    // Helper: Safe Fetch
-    const safeFetch = async (url: string, label: string): Promise<any[]> => {
-      try {
-        console.log(`Mastermind: Fetching ${label} from ${url}`);
-        const response = await requestUrl({
-          url,
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (response.status === 200 && response.json.models) {
-          return response.json.models;
-        } else if (response.status === 200 && response.json.publisherModels) {
-          return response.json.publisherModels;
-        } else {
-          console.warn(
-            `Mastermind: ${label} returned status ${response.status}`,
-          );
-          return [];
-        }
-      } catch (error) {
-        console.error(`Mastermind: Error fetching ${label}:`, error);
-        return [];
-      }
-    };
-
-    // 1. Fetch Publisher Models (Google / Gemini)
-    // Always include the us-central1 catalog (Model Garden home), then layer in the configured region.
-    const centralPublisherUrl = `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectId}/locations/us-central1/publishers/google/models`;
-    const centralPublisherModels = await safeFetch(
-      centralPublisherUrl,
-      "Publisher Models (us-central1)",
-    );
-
-    let publisherModels = [...centralPublisherModels];
-
-    if (discoveryLocation !== "us-central1") {
-      const regionalPublisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/publishers/google/models`;
-      const regionalPublisherModels = await safeFetch(
-        regionalPublisherUrl,
-        `Publisher Models (${discoveryLocation})`,
-      );
-
-      if (regionalPublisherModels.length === 0) {
-        console.warn(
-          `Mastermind: No publisher models discovered in ${discoveryLocation}. Using us-central1 list only.`,
-        );
-      } else {
-        publisherModels.push(...regionalPublisherModels);
-      }
-    }
-
-    publisherModels.forEach((m: any) => {
-      // Filter for relevant models (Gemini, PaLM, Codey) to avoid noise
-      const name = m.name.split("/").pop();
-      if (
-        name.includes("gemini") ||
-        name.includes("bison") ||
-        name.includes("unicorn")
-      ) {
-        foundModels.add(name);
-      }
-    });
-
-    // 2. Fetch Project Models (Custom / Tuned)
-    // Endpoint: https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/models
-    if (projectId) {
-      const projectUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/models`;
-      const projectModels = await safeFetch(projectUrl, "Project Models");
-
-      projectModels.forEach((m: any) => {
-        const name = m.name.split("/").pop();
-        foundModels.add(name); // Add all custom models
-      });
-    }
-
-    // 3. Fallback / Merge
-    if (foundModels.size === 0) {
-      new Notice(`Mastermind: No models found via API. Using fallback list.`);
-      return this.setAvailableModelList(fallbackModels);
-    }
-
-    // Ensure our "known good" models are present if they weren't discovered (e.g. if region is weird)
-    // Actually, let's just return what we found, plus the fallbacks if the execution region allows?
-    // User preference: Trust the API, but if API returns nothing useful, assume connectivity issue.
-    // Let's merge found models with fallback models to ensure the user always has a choice,
-    // but put found models first? Or just sort them?
-    // Best UX: Show what is definitely available + known fallbacks.
-
-    // Add defaults to the set to ensure they are available selections
-    // Add defaults to the set to ensure they are available selections
-    fallbackModels.forEach((m) => foundModels.add(m));
-
-    const finalList = Array.from(foundModels).sort();
-    new Notice(
-      `Mastermind: Discovery complete. Available models: ${finalList.length}`,
-    );
-    return this.setAvailableModelList(finalList);
-  }
-
-  async *chat(
-    prompt: string,
-    context: string,
-    vaultService: any,
-    history: any[] = [],
-    images: { mimeType: string; data: string }[] = [],
-    signal?: AbortSignal,
-  ): AsyncGenerator<ChatResponse> {
-    console.log("Mastermind: Service - chat called");
-    const accessToken = await this.getAccessToken();
-    console.log("Mastermind: Service - token retrieved");
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
-    const location = this.location || "us-central1";
+    const location = this.location || 'us-central1';
+
+    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
+    // Updated: 2026-01-15
+    // Comprehensive Fallback List (Google Gemini 3.0, 2.5, 1.5, 1.0)
+    // Updated: 2026-01-15 - Confirmed IDs
+    const FALLBACK_MODELS = [
+      // Gemini 3.0 (Preview)
+      'gemini-3-pro-preview', // Correct ID
+      'gemini-3-flash-preview',
+
+      // Gemini 2.0 (Commonly cited)
+      'gemini-2.0-flash-exp',
+
+      // Gemini 1.5 (Stable)
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro-002',
+      'gemini-1.5-flash-002',
+
+      // Legacy
+      'gemini-1.0-pro'
+    ];
 
     try {
-      yield* this.chatInternal(
-        prompt,
-        context,
-        vaultService,
-        history,
-        images,
-        accessToken,
-        projectId,
-        location,
-        "",
-        "",
-        0,
-        signal,
-      );
-    } catch (error: any) {
-      if (signal?.aborted) return; // Silent exit on abort
+      const response = await requestUrl({
+        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-      // Automatic Fallback to us-central1 for 404/400 or certain model errors
-      const isConfigError =
-        error.message.includes("404") ||
-        error.message.includes("not found") ||
-        error.message.includes("400");
+      if (response.status === 200) {
+        const data = response.json;
+        if (data.models) {
+          const fetched = data.models
+            .map((m: any) => m.name.split('/').pop())
+            .filter((id: string) => id.includes('gemini'));
 
-      if (location !== "us-central1" && isConfigError) {
-        console.log(
-          `Mastermind: Chat failed in ${location} (Error: ${error.message}). Falling back to us-central1 + Safe Model...`,
-        );
-        // Override model to a known good one for fallback
-        this.setAvailableModelList(this.getProviderFallbackModels());
-        yield* this.chatInternal(
-          prompt,
-          context,
-          vaultService,
-          history,
-          images,
-          accessToken,
-          projectId,
-          "us-central1",
-          "",
-          "",
-          0,
-          signal,
-        );
-      } else if (error.message.includes("400")) {
-        // Fallback for bad model name even if in us-central1
-        console.log(
-          "Mastermind: 400 Bad Request. Retrying with provider fallback model...",
-        );
-        this.setAvailableModelList(this.getProviderFallbackModels());
-        yield* this.chatInternal(
-          prompt,
-          context,
-          vaultService,
-          history,
-          images,
-          accessToken,
-          projectId,
-          location,
-          "",
-          "",
-          0,
-          signal,
-        );
-      } else {
-        throw error;
+          if (fetched.length > 0) {
+            // Merge fetched with important fallbacks (dedupe)
+            return [...new Set([...fetched, ...FALLBACK_MODELS])].sort();
+          }
+        }
       }
+      return FALLBACK_MODELS;
+    } catch (error) {
+      console.error('Mastermind: Failed to list models via API, using comprehensive fallback.', error);
+      return FALLBACK_MODELS;
     }
   }
 
-  private async *chatInternal(
-    prompt: string,
-    context: string,
-    vaultService: any,
-    history: any[] = [],
-    images: { mimeType: string; data: string }[] = [],
-    accessToken: string,
-    projectId: string,
-    location: string,
-    initialText: string = "",
-    initialThinking: string = "",
-    recursionDepth: number = 0,
-    signal?: AbortSignal,
-  ): AsyncGenerator<ChatResponse> {
-    if (recursionDepth > 30) {
-      yield {
-        text: "\n\n**Error:** Max recursion limit reached (30 steps). The model is looping or the task is too complex.",
-        actions: [],
-      };
-      return;
-    }
-
-    if (signal?.aborted) {
-      throw new Error("AbortError");
-    }
+  async chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = []): Promise<string> {
+    const accessToken = await this.getAccessToken();
+    const projectId = JSON.parse(this.serviceAccountJson).project_id;
 
     // Model Selection
-    const modelId = this.ensureModelSelection();
-    const isClaude = modelId.startsWith("claude");
-    const isEndpoint = /^\d+$/.test(modelId) || modelId.includes("/endpoints/"); // Numeric ID or full resource path
-    const effectiveLocation = location || "us-central1";
+    const modelId = this.modelId || 'gemini-2.0-flash-exp';
+    const isClaude = modelId.startsWith('claude');
+    const isEndpoint = /^\d+$/.test(modelId) || modelId.includes('/endpoints/'); // Numeric ID or full resource path
+    const location = this.location || 'us-central1';
 
-    // --- NON-STREAMING MODELS (Legacy/Other Providers) ---
-    if (isEndpoint || isClaude || modelId.includes("imagen")) {
-      // Reuse existing logic but return a single yield
-      // Note: We need to copy-paste the logic for these or refactor them out.
-      // For brevity, I'm refactoring the requestUrl calls here to just yield the final result.
+    // 1. CUSTOM ENDPOINT (Mistral, Llama, Fine-tunes deployed in Garden)
+    if (isEndpoint) {
+      // Support for Resource Path: projects/123/locations/us-central1/endpoints/456...
+      // Or simple ID: 1234567890 (assumed in current project/location)
+      const endpointResource = modelId.includes('/') ? modelId : `projects/${projectId}/locations/${location}/endpoints/${modelId}`;
+      const url = `https://${location}-aiplatform.googleapis.com/v1/${endpointResource}:predict`;
 
-      let url = "";
-      let body: any = {};
+      // Standard MaaS Payload (Mistral/Llama usually accept: { instances: [{ prompt: "..." }], parameters: {...} })
+      // or OpenAI-compatible format if deployed with vLLM (check documentation).
+      // Let's implement the standard Vertex AI "Raw Prediction" or "Predict" format for text generation.
+      // Most Model Garden text models expect: { instances: [ { prompt: ... } ], parameters: { maxOutputTokens: ... } }
 
-      if (isEndpoint) {
-        const endpointResource = modelId.includes("/")
-          ? modelId
-          : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
-        const host =
-          effectiveLocation === "global"
-            ? "aiplatform.googleapis.com"
-            : `${effectiveLocation}-aiplatform.googleapis.com`;
-
-        // Use SSE for streaming models
-        const useSSE = !isEndpoint;
-        url = `https://${host}/v1/${endpointResource}:${isEndpoint ? "predict" : "streamGenerateContent"}${useSSE ? "?alt=sse" : ""}`;
-
-        body = {
-          instances: [
-            {
-              prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:`,
-            },
-          ],
-          parameters: {
-            temperature: this.temperature,
-            maxOutputTokens: this.maxOutputTokens,
-            topP: 0.95,
-          },
-        };
-      } else if (isClaude) {
-        url = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
-        const messages = history.map((h) => ({
-          role: h.role === "model" ? "assistant" : "user",
-          content: h.parts[0].text,
-        }));
-        messages.push({
-          role: "user",
-          content: `Context:\n${context}\n\nQuestion: ${prompt}`,
-        });
-        body = {
-          anthropic_version: "vertex-2023-10-16",
-          messages: messages,
-          system: `You are Mastermind. ${this.customContextPrompt || ""} Be concise.`,
-          max_tokens: this.maxOutputTokens,
-          temperature: this.temperature,
-          stream: false,
-        };
-      } else {
-        // Imagen
-        url = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:predict`;
-        body = {
-          instances: [{ prompt: prompt }],
-          parameters: { sampleCount: 1 },
-        };
-        new Notice("Mastermind: Generating image...");
-      }
+      const body = {
+        instances: [
+          {
+            prompt: `System: You are Mastermind.\nContext: ${context}\n\nUser: ${prompt}\nAssistant:`,
+            // Some models treat "messages" list differently.
+            // For broad compatibility with raw endpoints, we construct a single prompt string.
+            // Ideally, we'd detect the model type, but for "generic endpoint" support, text completion is safest default.
+          }
+        ],
+        parameters: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+          topP: 0.95
+        }
+      };
 
       const response = await requestUrl({
         url,
-        method: "POST",
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(body)
       });
 
-      if (response.status !== 200)
-        throw new Error(`API Error ${response.status}: ${response.text}`);
-      const data = response.json;
-
-      if (modelId.includes("imagen")) {
-        if (data.predictions?.[0]?.bytesBase64Encoded) {
-          const link = await vaultService.saveImage(
-            data.predictions[0].bytesBase64Encoded,
-          );
-          yield {
-            text: `Here is your generated image:\n\n${link}`,
-            actions: [],
-          };
-          return;
-        }
-        throw new Error("No image data returned.");
+      if (response.status !== 200) {
+        throw new Error(`Endpoint Error ${response.status}: ${response.text}`);
       }
 
-      const text = isEndpoint
-        ? data.predictions[0].content
-        : data.content
-          ? data.content[0].text
-          : JSON.stringify(data);
-      yield { text, actions: [] };
-      return;
+      const data = response.json;
+      // Standard Vertex Predict Response: { predictions: [ "text" ] } or { predictions: [ { content: "text" } ] }
+      const pred = data.predictions[0];
+      if (typeof pred === 'string') return pred;
+      if (pred.content) return pred.content;
+      return JSON.stringify(pred); // Fallback
     }
 
-    // --- GEMINI STREAMING ---
-    const isGemini3 = modelId.includes("gemini-3");
-    const apiVersion =
-      isGemini3 ||
-      modelId.includes("preview") ||
-      modelId.includes("exp") ||
-      modelId.includes("beta")
-        ? "v1beta1"
-        : "v1";
-    const runLocation = isGemini3 ? "global" : effectiveLocation;
+    // 2. ANTHROPIC CLAUDE (via Vertex AI)
+    if (isClaude) {
+      // Claude typically uses `streamRawPredict` or `rawPredict` on a specific endpoint
+      // e.g. https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022:streamRawPredict
+      const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/anthropic/models/${modelId}:streamRawPredict`;
 
-    // DUAL PROVIDER: Build URL and headers based on auth provider
-    let url: string;
-    let authHeaders: Record<string, string>;
+      // Construct Claude-specific payload
+      const messages = history.map(h => ({
+        role: h.role === 'model' ? 'assistant' : 'user',
+        content: h.parts[0].text // Simplify: previous parts usually just text
+      }));
+      // Add current prompt
+      messages.push({ role: "user", content: `Context:\n${context}\n\nQuestion: ${prompt}` });
 
-    if (this.authProvider === "aistudio") {
-      // AI Studio uses generativelanguage.googleapis.com with API key
-      url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelId}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.aiStudioKey)}`;
-      authHeaders = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": this.aiStudioKey,
+      const body = {
+        anthropic_version: "vertex-2023-10-16",
+        messages: messages,
+        system: `You are Mastermind. ${this.customContextPrompt || ''} Be concise.`,
+        max_tokens: 4096,
+        stream: false
       };
-    } else {
-      // Vertex AI uses regional aiplatform.googleapis.com with Bearer token
-      url = `${this.getBaseUrl(runLocation).replace("/v1/", `/${apiVersion}/`)}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`;
-      authHeaders = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
+
+      const response = await requestUrl({
+        url,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json; charset=utf-8'
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (response.status !== 200) {
+        throw new Error(`Claude API Error ${response.status}: ${response.text}`);
+      }
+
+      // Parse Claude Response (streamRawPredict returns NDJSON-like lines if streamed, but we falsed it?
+      // Actually streamRawPredict might return a stream. Let's try `rawPredict` if available, or just parse carefully.)
+      // Vertex Claude often returns a JSON list if not streaming.
+      // Let's assume standard response for now. If it fails, we fall back.
+      const data = response.json;
+      // Adjust based on actual shape (often data.content[0].text)
+      return data.content ? data.content[0].text : JSON.stringify(data);
     }
+
+    // 2. GOOGLE GEMINI (Default)
+    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
 
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
@@ -748,27 +349,22 @@ Then provide your final answer.`;
     // Tools definition (Reuse existing)
     const tools = [
       {
-        functionDeclarations: [
-          {
-            name: "generate_image",
-            description:
-              "Generates an image based on a prompt using Imagen 3. Use this when the user asks to draw, paint, or create an image.",
-            parameters: {
-              type: "object",
-              properties: {
-                prompt: {
-                  type: "string",
-                  description:
-                    "The visual description of the image to generate.",
-                },
-              },
-              required: ["prompt"],
-            },
-          },
+        function_declarations: [
           {
             name: "list_files",
             description: "Lists all markdown files in the vault.",
             parameters: { type: "object", properties: {} },
+          },
+          {
+            name: 'list_directory',
+            description: 'Lists the contents of a specific directory/folder.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'The path of the folder to list.' }
+              },
+              required: ['path']
+            }
           },
           {
             name: "list_directory",
@@ -855,621 +451,112 @@ Then provide your final answer.`;
                   description: "The path of the file to delete.",
                 },
               },
-              required: ["path"],
-            },
-          },
-          {
-            name: "move_file",
-            description: "Moves or renames a file or folder.",
-            parameters: {
-              type: "object",
-              properties: {
-                oldPath: { type: "string", description: "The current path." },
-                newPath: { type: "string", description: "The new path." },
-              },
-              required: ["oldPath", "newPath"],
-            },
-          },
-
-          {
-            name: "run_terminal_command",
-            description:
-              "Executes a shell command on the host OS. Use with caution.",
-            parameters: {
-              type: "object",
-              properties: {
-                command: {
-                  type: "string",
-                  description: "The shell command to execute.",
-                },
-              },
-              required: ["command"],
-            },
-          },
-          {
-            name: "fetch_url",
-            description:
-              "Fetches the content of a URL. Useful for reading documentation or articles.",
-            parameters: {
-              type: "object",
-              properties: {
-                url: {
-                  type: "string",
-                  description: "The absolute URL to fetch.",
-                },
-              },
-              required: ["url"],
-            },
-          },
-          {
-            name: "append_to_note",
-            description: "Appends content to the end of a note.",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                content: { type: "string" },
-              },
-              required: ["path", "content"],
-            },
-          },
-          {
-            name: "prepend_to_note",
-            description:
-              "Prepends content to the start of a note (after frontmatter if present).",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                content: { type: "string" },
-              },
-              required: ["path", "content"],
-            },
-          },
-          {
-            name: "update_section",
-            description:
-              "Updates a specific section of a note under a given header.",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                header: {
-                  type: "string",
-                  description: "The exact header text (without #)",
-                },
-                content: {
-                  type: "string",
-                  description: "The new content for the section",
-                },
-              },
-              required: ["path", "header", "content"],
-            },
-          },
-          {
-            name: "get_tags",
-            description: "Gets all unique tags in the vault.",
-            parameters: { type: "object", properties: {} },
-          },
-          {
-            name: "get_links",
-            description: "Gets all outgoing links from a specific note.",
-            parameters: {
-              type: "object",
-              properties: { path: { type: "string" } },
-              required: ["path"],
-            },
-          },
-        ],
-      },
-      {
-        googleSearch: {},
-      },
-    ];
-
-    // Sanitize history to remove plugin-internal fields like 'actions'
-    let contents: any[] = history.map((item) => ({
-      role: item.role,
-      parts: item.parts,
-    }));
-
-    // Process images
-    const pParts: any[] = [
-      { text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` },
-    ];
-    for (const img of images) {
-      pParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
-    }
-    contents.push({ role: "user", parts: pParts });
-
-    const body = {
-      contents,
-      system_instruction: { parts: [{ text: systemInstructionText }] },
-      tools,
-      generationConfig: {
-        temperature: this.temperature,
-        maxOutputTokens: this.maxOutputTokens,
-      },
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_ONLY_HIGH",
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_ONLY_HIGH",
-        },
-      ],
-    };
-
-    // --- NODE JS HTTPS STREAMING ---
-    console.log(`Mastermind: Starting stream request to ${url}`);
-
-    let stream;
-    try {
-      stream = this.streamRequest(url, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify(body),
-        signal: signal,
-      });
-    } catch (e) {
-      console.error("Mastermind: Failed to initiate stream", e);
-      throw e;
-    }
-
-    let buffer = "";
-    let accumulatedText = initialText;
-    let accumulatedThinking = initialThinking;
-    let isThinking = false;
-    let accumulatedFunctions: any[] = [];
-    // STREAMING LOOP
-    try {
-      let buffer = "";
-
-      for await (const chunk of stream) {
-        // console.log(`Mastermind: Chunk ${chunk.length} bytes`);
-        buffer += chunk;
-
-        let boundary = buffer.indexOf("\n");
-        while (boundary !== -1) {
-          const line = buffer.substring(0, boundary).trim();
-          buffer = buffer.substring(boundary + 1);
-          boundary = buffer.indexOf("\n"); // Look for next
-
-          if (!line || line.startsWith(":")) continue; // Skip Keep-Alive / Comments
-
-          const jsonStr = line.replace(/^data:\s*/, "").trim();
-          if (!jsonStr) continue;
-
-          try {
-            const data = JSON.parse(jsonStr);
-            const candidates = data.candidates;
-            if (candidates && candidates[0]) {
-              const candidate = candidates[0];
-              if (candidate.content && candidate.content.parts) {
-                for (const part of candidate.content.parts) {
-                  if (part.text) {
-                    // THINKING PARSER
-                    let textPart = part.text;
-                    let remaining = textPart;
-
-                    while (remaining.length > 0) {
-                      if (!isThinking) {
-                        // Case insensitive match for start of thinking block
-                        const match = remaining.match(/```thinking/i);
-                        if (match && match.index !== undefined) {
-                          const startIdx = match.index;
-                          accumulatedText += remaining.substring(0, startIdx);
-                          remaining = remaining.substring(
-                            startIdx + match[0].length,
-                          );
-                          isThinking = true;
-                          console.log("Mastermind: Thinking block STARTED");
-                        } else {
-                          accumulatedText += remaining;
-                          remaining = "";
-                        }
-                      } else {
-                        const endIdx = remaining.indexOf("```");
-                        if (endIdx !== -1) {
-                          const thoughtChunk = remaining.substring(0, endIdx);
-                          accumulatedThinking += thoughtChunk;
-                          remaining = remaining.substring(endIdx + 3);
-                          isThinking = false;
-                          console.log(
-                            "Mastermind: Thinking block ENDED. Content length:",
-                            thoughtChunk.length,
-                          );
-                        } else {
-                          accumulatedThinking += remaining;
-                          // console.log('Mastermind: Thinking chunk:', remaining.length);
-                          remaining = "";
-                        }
-                      }
-                    }
-
-                    yield {
-                      text: accumulatedText,
-                      isThinking: isThinking,
-                      thinkingText: accumulatedThinking,
-                      actions: [],
-                    };
-                  } else if (part.functionCall) {
-                    accumulatedFunctions.push(part.functionCall);
-                  }
-                }
-              }
+              required: ['path']
             }
-          } catch (e) {
-            // Partial JSON - ignore
           }
-        }
+        ]
       }
-    } catch (e) {
-      console.error("Mastermind: Streaming Loop Error", e);
-      throw e;
+    ];
+
+    let contents: any[] = [...history];
+    const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
+
+    for (const img of images) {
+      parts.push({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.data
+        }
+      });
     }
 
-    // END OF STREAM ACTIONS (Recursion)
-    if (accumulatedFunctions.length > 0) {
-      const functionResponseParts: any[] = [];
-      const executedActions: ToolAction[] = [];
+    contents.push({ role: 'user', parts });
 
-      // Add model's thinking so far to history
-      const modelParts: any[] = [];
-      if (accumulatedText && accumulatedText.trim()) {
-        modelParts.push({ text: accumulatedText });
+    for (let i = 0; i < 5; i++) {
+      const body = {
+        contents,
+        system_instruction: { parts: [{ text: systemInstructionText }] },
+        tools,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+      };
+
+      const response = await requestUrl({
+        url,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (response.status !== 200) {
+        throw new Error(`Vertex AI Error ${response.status}: ${response.text}`);
       }
-      for (const fc of accumulatedFunctions) {
-        modelParts.push({ functionCall: fc });
+
+      const data = response.json;
+      if (!data.candidates || data.candidates.length === 0) {
+        // Check if blocked
+        if (data.promptFeedback?.blockReason) {
+          throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
+        }
+        throw new Error('No candidates returned from Vertex AI.');
       }
-      contents.push({ role: "model", parts: modelParts });
+
+      const candidate = data.candidates[0];
+
+      if (candidate.finishReason === 'SAFETY') {
+        throw new Error('Response blocked due to safety settings.');
+      }
+
+      if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        throw new Error('Received empty content from Vertex AI.');
+      }
+
+      const part = candidate.content.parts[0];
 
       for (const funcCall of accumulatedFunctions) {
         const { name, args } = funcCall;
         let result: any;
 
-        // Yield pending status
-        yield {
-          text: accumulatedText,
-          thinkingText: accumulatedThinking,
-          actions: [{ tool: name, input: args, status: "pending" }],
-        };
-
         try {
-          if (name === "generate_image") {
-            new Notice(
-              `Mastermind: Switching to Imagen 3 for "${args.prompt}"...`,
-            );
-            const imagenLink = await this.generateImageInternal(
-              args.prompt,
-              accessToken,
-              projectId,
-              location,
-              vaultService,
-            );
-            result = {
-              status: "success",
-              image_link: imagenLink,
-              message: "Image generated successfully.",
-            };
-          } else if (
-            name === "list_files" ||
-            name === "read_file" ||
-            name === "search_content" ||
-            name === "list_directory" ||
-            name === "get_tags" ||
-            name === "get_links"
-          ) {
-            // READ OPERATIONS
-            if (!this.permVaultRead) {
-              result = {
-                status: "error",
-                message:
-                  "Permission denied: Vault read access is disabled in settings.",
-              };
-            } else {
-              if (name === "list_files") {
-                result = await vaultService.listMarkdownFiles();
-              } else if (name === "read_file") {
-                result = await vaultService.getFileContent(args.path);
-              } else if (name === "search_content") {
-                result = await vaultService.searchVault(args.query);
-              } else if (name === "list_directory") {
-                result = await vaultService.listFolder(args.path);
-              } else if (name === "get_tags") {
-                const tags = await vaultService.getTags();
-                result = { status: "success", tags: tags };
-              } else if (name === "get_links") {
-                const links = await vaultService.getLinks(args.path);
-                result = { status: "success", links: links };
-              }
-            }
-          } else if (
-            name === "create_note" ||
-            name === "create_folder" ||
-            name === "move_file" ||
-            name === "append_to_note" ||
-            name === "prepend_to_note" ||
-            name === "update_section"
-          ) {
-            // WRITE OPERATIONS
-            if (!this.permVaultWrite) {
-              result = {
-                status: "error",
-                message:
-                  "Permission denied: Vault write access is disabled in settings.",
-              };
-            } else {
-              if (name === "create_note") {
-                await vaultService.createNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Note created at ${args.path}`,
-                };
-              } else if (name === "create_folder") {
-                await vaultService.createFolder(args.path);
-                result = {
-                  status: "success",
-                  message: `Folder created at ${args.path}`,
-                };
-              } else if (name === "move_file") {
-                await vaultService.moveFile(args.oldPath, args.newPath);
-                result = {
-                  status: "success",
-                  message: `Moved ${args.oldPath} to ${args.newPath}`,
-                };
-              } else if (name === "append_to_note") {
-                await vaultService.appendToNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Appended content to ${args.path}`,
-                };
-              } else if (name === "prepend_to_note") {
-                await vaultService.prependToNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Prepended content to ${args.path}`,
-                };
-              } else if (name === "update_section") {
-                await vaultService.updateNoteSection(
-                  args.path,
-                  args.header,
-                  args.content,
-                );
-                result = {
-                  status: "success",
-                  message: `Updated section "${args.header}" in ${args.path}`,
-                };
-              }
-            }
-          } else if (name === "delete_file") {
-            // DELETE OPERATIONS
-            if (!this.permVaultDelete) {
-              result = {
-                status: "error",
-                message:
-                  "Permission denied: Vault delete access is disabled in settings.",
-              };
-            } else {
-              // @ts-ignore
-              if (
-                this.confirmVaultDestructive &&
-                vaultService.app.plugins.getPlugin(
-                  "obsidian-vertex-ai-mastermind",
-                ).settings.confirmVaultDestructive
-              ) {
-                result = {
-                  status: "error",
-                  message:
-                    "Vault deletions require confirmation. Please enable this manually or disable confirmation in settings.",
-                };
-              } else {
-                await vaultService.deleteFile(args.path);
-                result = {
-                  status: "success",
-                  message: `File deleted at ${args.path}`,
-                };
-              }
-            }
-          } else if (name === "run_terminal_command") {
-            // TERMINAL OPERATIONS
-            if (!this.permTerminal) {
-              result = {
-                status: "error",
-                message:
-                  "Permission denied: Terminal access is disabled in settings.",
-              };
-            } else {
-              // @ts-ignore
-              if (
-                this.confirmTerminalDestructive &&
-                vaultService.app.plugins.getPlugin(
-                  "obsidian-vertex-ai-mastermind",
-                ).settings.confirmTerminalDestructive
-              ) {
-                result = {
-                  status: "error",
-                  message:
-                    "Terminal commands require confirmation. Disable confirmation in settings.",
-                };
-              } else {
-                try {
-                  const { stdout, stderr } = await execAsync(args.command);
-                  result = {
-                    status: "success",
-                    stdout: stdout,
-                    stderr: stderr,
-                  };
-                } catch (e: any) {
-                  result = {
-                    status: "error",
-                    message: e.message,
-                    stderr: e.stderr,
-                  };
-                }
-              }
-            }
-          } else if (name === "fetch_url") {
-            // WEB OPERATIONS
-            if (!this.permWeb) {
-              result = {
-                status: "error",
-                message:
-                  "Permission denied: Web access is disabled in settings.",
-              };
-            } else {
-              try {
-                const response = await requestUrl({ url: args.url });
-                const text = response.text.substring(0, 10000);
-                result = {
-                  status: "success",
-                  content_snippet: text,
-                  full_length: response.text.length,
-                };
-              } catch (e: any) {
-                result = { status: "error", message: e.message };
-              }
-            }
-          } else {
-            result = { status: "error", message: `Unknown tool: ${name}` };
+          if (name === 'list_files') {
+            result = await vaultService.listMarkdownFiles();
+          } else if (name === 'read_file') {
+            result = await vaultService.getFileContent(args.path);
+          } else if (name === 'search_content') {
+            result = await vaultService.searchVault(args.query);
+          } else if (name === 'create_note') {
+            await vaultService.createNote(args.path, args.content);
+            result = { status: 'success', message: `Note created at ${args.path}` };
+          } else if (name === 'create_folder') {
+            await vaultService.createFolder(args.path);
+            result = { status: 'success', message: `Folder created at ${args.path}` };
+          } else if (name === 'delete_file') {
+            await vaultService.deleteFile(args.path);
+            result = { status: 'success', message: `File deleted at ${args.path}` };
           }
-        } catch (e: any) {
-          result = { status: "error", message: e.message };
+        } catch (err: any) {
+          result = { status: 'error', message: err.message };
         }
 
-        executedActions.push({
-          tool: name,
-          input: args,
-          output: result,
-          status: result.status,
+        contents.push(candidate.content);
+
+        contents.push({
+          role: 'function',
+          parts: [{
+            functionResponse: {
+              name,
+              response: { name, content: result }
+            }
+          }]
         });
-        functionResponseParts.push({
-          functionResponse: { name, response: { content: result } },
-        });
+      } else {
+        return part.text;
       }
-
-      contents.push({ role: "user", parts: functionResponseParts });
-      yield* this.chatInternal(
-        prompt,
-        context,
-        vaultService,
-        contents,
-        [],
-        accessToken,
-        projectId,
-        location,
-        accumulatedText,
-        accumulatedThinking,
-        recursionDepth + 1,
-        signal,
-      );
-    }
-  }
-
-  // Helper: Generate Image (Imagen 3)
-  private async generateImageInternal(
-    prompt: string,
-    accessToken: string,
-    projectId: string,
-    location: string,
-    vaultService: any,
-  ): Promise<string> {
-    // Use 'imagen-3.0-generate-001' as default for auto-switching
-    const modelId = "imagen-3.0-generate-001";
-    const url = `${this.getBaseUrl(location)}/publishers/google/models/${modelId}:predict`;
-
-    const body = {
-      instances: [{ prompt: prompt }],
-      parameters: {
-        sampleCount: 1,
-      },
-    };
-
-    const response = await requestUrl({
-      url,
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (response.status !== 200) {
-      throw new Error(`Imagen Error ${response.status}: ${response.text}`);
     }
 
-    const data = response.json;
-    if (
-      data.predictions &&
-      data.predictions.length > 0 &&
-      data.predictions[0].bytesBase64Encoded
-    ) {
-      const base64 = data.predictions[0].bytesBase64Encoded;
-      return await vaultService.saveImage(base64);
-    }
-    throw new Error("No image data returned from Imagen.");
-  }
-
-  // Node.js HTTPS Streaming Helper
-  private async *streamRequest(
-    urlStr: string,
-    options: any,
-  ): AsyncGenerator<string> {
-    const https = require("https");
-    const { URL } = require("url");
-    const url = new URL(urlStr);
-    const reqOptions = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname + url.search,
-      method: options.method,
-      headers: options.headers,
-      signal: options.signal,
-    };
-
-    const queue = new AsyncQueue<string>();
-
-    const req = https.request(reqOptions, (res: any) => {
-      if (res.statusCode && res.statusCode >= 300) {
-        let errorBody = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => {
-          errorBody += chunk;
-        });
-        res.on("end", () => {
-          console.error(
-            `Mastermind: HTTPS Error ${res.statusCode} Body:`,
-            errorBody,
-          );
-          queue.fail(new Error(`HTTP Error ${res.statusCode}: ${errorBody}`));
-        });
-        return;
-      }
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => {
-        console.log(`Mastermind: HTTPS chunk received (${chunk.length} bytes)`);
-        queue.push(chunk);
-      });
-      res.on("end", () => {
-        console.log("Mastermind: HTTPS stream ended");
-        queue.close();
-      });
-      res.on("error", (err: Error) => {
-        console.error("Mastermind: HTTPS stream error", err);
-        queue.fail(err);
-      });
-    });
-
-    req.on("error", (err: any) => queue.fail(err));
-    req.write(options.body);
-    req.end();
-
-    yield* queue;
+    throw new Error('Maximum tool use iterations reached.');
   }
 
   // Helper method to validate JSON
@@ -1480,65 +567,5 @@ Then provide your final answer.`;
     } catch {
       return false;
     }
-  }
-  // End of class
-}
-
-// Simple Async Queue for buffering stream events
-class AsyncQueue<T> {
-  private queue: T[] = [];
-  private resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-  private rejectNext: ((reason?: any) => void) | null = null;
-  private closed = false;
-  private error: Error | null = null;
-
-  push(value: T) {
-    if (this.closed) return;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value, done: false });
-    } else {
-      this.queue.push(value);
-    }
-  }
-
-  close() {
-    this.closed = true;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value: undefined as any, done: true });
-    }
-  }
-
-  fail(err: Error) {
-    this.error = err;
-    if (this.rejectNext) {
-      const reject = this.rejectNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      reject(err);
-    }
-  }
-
-  [Symbol.asyncIterator]() {
-    return {
-      next: () => {
-        if (this.error) return Promise.reject(this.error);
-        if (this.queue.length > 0) {
-          return Promise.resolve({ value: this.queue.shift()!, done: false });
-        }
-        if (this.closed) {
-          return Promise.resolve({ value: undefined as any, done: true });
-        }
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-          this.resolveNext = resolve;
-          this.rejectNext = reject;
-        });
-      },
-    };
   }
 }

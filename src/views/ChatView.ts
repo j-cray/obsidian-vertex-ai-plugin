@@ -1,11 +1,11 @@
-import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
-import MastermindPlugin from "../main";
-import { VertexService } from "../services/vertex";
-import { VaultService } from "../services/vault";
-import { MessageRenderer } from "./MessageRenderer"; // Import Renderer
-import { ToolAction } from "../types";
+import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
+import MastermindPlugin from '../main';
+import { VertexService } from '../services/vertex';
+import { VaultService } from '../services/vault';
+import { MessageRenderer } from './MessageRenderer'; // Import Renderer
+import { ToolAction } from '../types';
 
-export const VIEW_TYPE_MASTERMIND = "mastermind-chat-view";
+export const VIEW_TYPE_MASTERMIND = 'mastermind-chat-view';
 
 interface ChatMessage {
   role: string;
@@ -53,15 +53,12 @@ export class MastermindChatView extends ItemView {
     container.addClass("chat-view");
 
     // --- TOOLBAR ---
-    this.toolbarEl = container.createDiv("chat-toolbar");
+    this.toolbarEl = container.createDiv('chat-toolbar');
 
     // Model Indicator
-    const modelContainer = this.toolbarEl.createDiv("model-picker-container");
-    this.modelLabel = modelContainer.createEl("span", {
-      cls: "model-indicator",
-    });
-    this.modelLabel.innerText =
-      this.plugin.settings.modelId || "gemini-2.0-flash-001";
+    const modelContainer = this.toolbarEl.createDiv('model-picker-container');
+    this.modelLabel = modelContainer.createEl('span', { cls: 'model-indicator' });
+    this.modelLabel.innerText = this.plugin.settings.modelId || 'gemini-2.0-flash-exp';
     this.modelLabel.title = "Current Model (Click to Settings)";
 
     this.plugin.onSettingsChange(() => {
@@ -78,12 +75,12 @@ export class MastermindChatView extends ItemView {
     };
 
     // ACTION BUTTONS
-    const actionsDiv = this.toolbarEl.createDiv({ cls: "toolbar-actions" });
-    actionsDiv.style.display = "flex";
-    actionsDiv.style.gap = "8px";
+    const actionsDiv = this.toolbarEl.createDiv({ cls: 'toolbar-actions' });
+    actionsDiv.style.display = 'flex';
+    actionsDiv.style.gap = '8px';
 
     // NEW CHAT
-    const newChatBtn = actionsDiv.createEl("button", { cls: "toolbar-btn" });
+    const newChatBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
     newChatBtn.title = "New Conversation";
     newChatBtn.onclick = async () => {
@@ -92,10 +89,7 @@ export class MastermindChatView extends ItemView {
         return;
       }
       if (this.messages.length > 0) {
-        if (
-          !this.plugin.settings.history ||
-          !Array.isArray(this.plugin.settings.history)
-        ) {
+        if (!this.plugin.settings.history || !Array.isArray(this.plugin.settings.history)) {
           this.plugin.settings.history = [];
         }
         await this.plugin.saveSettings();
@@ -107,7 +101,7 @@ export class MastermindChatView extends ItemView {
     };
 
     // HISTORY
-    const historyBtn = actionsDiv.createEl("button", { cls: "toolbar-btn" });
+    const historyBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>`;
     historyBtn.title = "History";
     historyBtn.onclick = () => {
@@ -116,7 +110,7 @@ export class MastermindChatView extends ItemView {
     };
 
     // SETTINGS
-    const settingsBtn = actionsDiv.createEl("button", { cls: "toolbar-btn" });
+    const settingsBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
     settingsBtn.title = "Settings";
     settingsBtn.onclick = () => {
@@ -127,7 +121,7 @@ export class MastermindChatView extends ItemView {
     };
 
     // --- MESSAGES ---
-    this.messageContainer = container.createDiv("chat-messages");
+    this.messageContainer = container.createDiv('chat-messages');
     this.messageRenderer = new MessageRenderer(this.app, this.messageContainer);
 
     // --- INPUT AREA ---
@@ -135,7 +129,7 @@ export class MastermindChatView extends ItemView {
     const inputContainer = inputWrapper.createDiv("chat-input-container");
 
     // Overlay Icons
-    const overlay = inputContainer.createDiv("chat-features-overlay");
+    const overlay = inputContainer.createDiv('chat-features-overlay');
     const icons = [
       {
         name: "file",
@@ -157,13 +151,13 @@ export class MastermindChatView extends ItemView {
       btn.onclick = () => new Notice(`${i.name} feature coming soon!`);
     });
 
-    this.inputEl = inputContainer.createEl("textarea", {
-      cls: "chat-input",
-      attr: { rows: "1" }, // Clean input, no placeholder
+    this.inputEl = inputContainer.createEl('textarea', {
+      cls: 'chat-input',
+      attr: { rows: '1' } // Clean input, no placeholder
     });
 
-    this.inputEl.addEventListener("input", () => {
-      this.inputEl.style.height = "auto";
+    this.inputEl.addEventListener('input', () => {
+      this.inputEl.style.height = 'auto';
       this.inputEl.style.height = `${this.inputEl.scrollHeight}px`;
     });
 
@@ -171,15 +165,13 @@ export class MastermindChatView extends ItemView {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.handleSendMessage();
-        this.inputEl.style.height = "auto"; // Reset height
+        this.inputEl.style.height = 'auto'; // Reset height
       }
     });
 
-    this.sendButton = inputContainer.createEl("button", {
-      cls: "chat-send-button",
-    });
+    this.sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
     this.updateSendButton(false);
-    this.sendButton.addEventListener("click", () => {
+    this.sendButton.addEventListener('click', () => {
       if (this.isGenerating) {
         this.stopGeneration();
       } else {
@@ -188,10 +180,7 @@ export class MastermindChatView extends ItemView {
     });
 
     // Hydrate History
-    if (
-      this.plugin.settings.history &&
-      this.plugin.settings.history.length > 0
-    ) {
+    if (this.plugin.settings.history && this.plugin.settings.history.length > 0) {
       this.messages = [...this.plugin.settings.history];
     }
     this.renderMessages();
@@ -200,12 +189,10 @@ export class MastermindChatView extends ItemView {
   updateSendButton(isGenerating: boolean) {
     this.isGenerating = isGenerating;
     if (isGenerating) {
-      this.sendButton.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
+      this.sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
       this.sendButton.title = "Stop Generating";
     } else {
-      this.sendButton.innerHTML =
-        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      this.sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       this.sendButton.title = "Send Message";
     }
   }
@@ -224,28 +211,16 @@ export class MastermindChatView extends ItemView {
     this.messageRenderer.renderTo(this.messageContainer);
 
     if (this.messages.length === 0) {
-      this.messageRenderer.renderAIMessage(
-        "Greetings. I am Mastermind. How can I assist you in your vault today?",
-        this.plugin.settings.profilePictureAI,
-      );
+      this.messageRenderer.renderAIMessage('Greetings. I am Mastermind. How can I assist you in your vault today?', this.plugin.settings.profilePictureAI);
     } else {
       for (const msg of this.messages) {
-        if (msg.role === "user") {
-          this.messageRenderer.renderUserMessage(
-            msg.parts[0].text,
-            this.plugin.settings.profilePictureUser,
-          );
+        if (msg.role === 'user') {
+          this.messageRenderer.renderUserMessage(msg.parts[0].text, this.plugin.settings.profilePictureUser);
         } else {
           // Process links asynchronously
-          this.vaultService
-            .enhanceTextWithLinks(msg.parts[0].text)
-            .then((enhancedText) => {
-              this.messageRenderer.renderAIMessage(
-                enhancedText,
-                this.plugin.settings.profilePictureAI,
-                msg.actions,
-              );
-            });
+          this.vaultService.enhanceTextWithLinks(msg.parts[0].text).then(enhancedText => {
+            this.messageRenderer.renderAIMessage(enhancedText, this.plugin.settings.profilePictureAI, msg.actions);
+          });
         }
       }
     }
@@ -255,7 +230,7 @@ export class MastermindChatView extends ItemView {
     const message = this.inputEl.value.trim();
     if (!message) return;
 
-    this.inputEl.value = "";
+    this.inputEl.value = '';
     this.updateSendButton(true); // Set to Stop state
 
     // Initialize AbortController
@@ -263,21 +238,13 @@ export class MastermindChatView extends ItemView {
     const signal = this.abortController.signal;
 
     // Render User Message
-    await this.messageRenderer.renderUserMessage(
-      message,
-      this.plugin.settings.profilePictureUser,
-    );
+    await this.messageRenderer.renderUserMessage(message, this.plugin.settings.profilePictureUser);
 
     // Prepare AI Message Container (Streaming)
-    const { update } = this.messageRenderer.startAIMessage(
-      this.plugin.settings.profilePictureAI,
-    );
+    const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
 
     // Streaming Loop with Signal
-    let finalResponse: import("../types").ChatResponse = {
-      text: "",
-      actions: [],
-    };
+    let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
 
     try {
       this.vertexService.updateSettings(this.plugin.settings);
@@ -286,14 +253,7 @@ export class MastermindChatView extends ItemView {
       const images = await this.vaultService.getActiveNoteImages();
 
       // Pass signal to chat
-      for await (const chunk of this.vertexService.chat(
-        message,
-        context,
-        this.vaultService,
-        this.plugin.settings.history,
-        images,
-        signal,
-      )) {
+      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images, signal)) {
         if (signal.aborted) break;
         await update(chunk, false);
         finalResponse = chunk;
@@ -302,22 +262,17 @@ export class MastermindChatView extends ItemView {
       if (!signal.aborted) {
         // Final Polish only if not aborted
         if (finalResponse.text) {
-          const enhancedText = await this.vaultService.enhanceTextWithLinks(
-            finalResponse.text,
-          );
+          const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
           finalResponse.text = enhancedText;
           await update(finalResponse, true);
         }
 
         // State Updates
-        const userMsg: ChatMessage = {
-          role: "user",
-          parts: [{ text: message }],
-        };
+        const userMsg: ChatMessage = { role: 'user', parts: [{ text: message }] };
         const aiMsg: ChatMessage = {
-          role: "model",
+          role: 'model',
           parts: [{ text: finalResponse.text }],
-          actions: finalResponse.actions,
+          actions: finalResponse.actions
         };
 
         this.messages.push(userMsg);
@@ -327,31 +282,21 @@ export class MastermindChatView extends ItemView {
         this.plugin.settings.history.push(aiMsg);
 
         if (this.plugin.settings.history.length > 40) {
-          this.plugin.settings.history =
-            this.plugin.settings.history.slice(-40);
+          this.plugin.settings.history = this.plugin.settings.history.slice(-40);
         }
 
         await this.plugin.saveSettings();
-        await (this.vaultService as any).writeHistory(
-          this.plugin.settings.history,
-          (this as any).sessionId,
-        );
+        await (this.vaultService as any).writeHistory(this.plugin.settings.history, (this as any).sessionId);
       }
+
     } catch (error: any) {
-      if (error.name === "AbortError" || signal.aborted) {
-        update(
-          {
-            text: `**[Stopped by User]**\n\n${finalResponse?.text || ""}`,
-            actions: [],
-          },
-          true,
-        );
+      if (error.name === 'AbortError' || signal.aborted) {
+        update({ text: `**[Stopped by User]**\n\n${finalResponse?.text || ''}`, actions: [] }, true);
       } else {
-        console.error("Mastermind Error:", error);
-        let errorMessage =
-          error instanceof Error ? error.message : String(error);
+        console.error('Mastermind Error:', error);
+        let errorMessage = error instanceof Error ? error.message : String(error);
         update({ text: `**Error**: ${errorMessage}`, actions: [] }, true);
-        new Notice("Mastermind Chat failed.");
+        new Notice('Mastermind Chat failed.');
       }
     } finally {
       this.updateSendButton(false);
