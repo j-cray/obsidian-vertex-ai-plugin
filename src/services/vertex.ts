@@ -654,10 +654,27 @@ Then provide your final answer.`;
             }]
           });
         } else if ('text' in part) {
-          yield {
-            text: part.text || '',
-            actions: []
-          };
+          // Extract thinking blocks and main text
+          const fullText = part.text || '';
+          const thinkingMatch = fullText.match(/```thinking\n([\s\S]*?)\n```/);
+          
+          if (thinkingMatch) {
+            const thinkingText = thinkingMatch[1].trim();
+            const mainText = fullText.replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim();
+            
+            // Yield thinking block first with streaming indicator
+            yield {
+              text: mainText,
+              actions: [],
+              isThinking: true,
+              thinkingText: thinkingText
+            };
+          } else {
+            yield {
+              text: fullText,
+              actions: []
+            };
+          }
           return;
         }
       }

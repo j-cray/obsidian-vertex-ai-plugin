@@ -53,7 +53,7 @@ export class MessageRenderer {
     // 1. Tool Actions Container
     const toolContainer = contentContainer.createDiv('chat-tool-actions');
 
-    // 2. Thinking Container (Card Style)
+    // 2. Thinking Container
     const thinkingContainer = contentContainer.createDiv('thinking-container');
     thinkingContainer.style.display = 'none';
 
@@ -62,140 +62,70 @@ export class MessageRenderer {
     setIcon(thinkingHeader.createSpan('thinking-icon'), 'brain-circuit');
     thinkingHeader.createSpan().innerText = 'Thinking Process';
 
-    // Dots Animation (Visible when thinking, hidden when text arrives?)
+    // Dots Animation (shown while waiting)
     const dotsContainer = thinkingContainer.createDiv('thinking-dots');
     dotsContainer.innerHTML = '<div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div>';
+    dotsContainer.style.display = 'none';
 
-    // Actual Content (Hidden by default or collateral?)
+    // Thinking Content (with scrollable limit)
     const thinkingContent = thinkingContainer.createDiv('thinking-content');
-    thinkingContent.style.display = 'none'; // Only show if we have text to show
+    thinkingContent.style.display = 'none';
+    thinkingContent.style.maxHeight = '200px';
+    thinkingContent.style.overflowY = 'auto';
 
     // 3. Response Text Container
     const textContainer = contentContainer.createDiv('chat-text-content');
 
-    // Typewriter State
+    // State management for smooth animations
     let fullTextToRender = '';
     let fullThinkingText = '';
-    let displayedTextLength = 0;
-    let isRendering = false;
-    let typeWriterInterval: any = null;
-
-    // Smoother Typewriter Logic
-    const processTypewriterQueue = async () => {
-      if (isRendering) return;
-      isRendering = true;
-
-      // Calculate how many chars we need to add
-      const targetLength = fullTextToRender.length;
-
-      if (displayedTextLength < targetLength) {
-        // Determine chunk size based on backlog to catch up if behind
-        const backlog = targetLength - displayedTextLength;
-        // Faster if backlog is huge, slower if small (1-3 chars)
-        const charsToAdd = backlog > 50 ? 5 : (backlog > 20 ? 2 : 1);
-
-        const nextChunk = fullTextToRender.substring(displayedTextLength, displayedTextLength + charsToAdd);
-        displayedTextLength += charsToAdd;
-
-        // Append text mostly raw, creating span for animation if needed, or just markdown render the WHOLE thing if heavily formatted?
-        // MarkdownRenderer on partial text is risky (breaks formatting).
-        // HYBRID APPROACH:
-        // 1. Render FULL Markdown to a hidden div.
-        // 2. Reveal it? No, that doesn't typewrite.
-        // 3. Simple approach: specific debounce for Markdown, BUT smooth scroll for text.
-        // The user wants "one letter at a time".
-        // Markdown rendering is expensive. We can't re-render MD on every letter.
-        // compromise: Render Markdown frequently (debounce 50ms), but internally use CSS to reveal? Complex.
-
-        // REVISED APPROACH per User Request:
-        // "comes in big chunks not one letter at a time".
-        // The issue is likely `vertex.ts` yielding explicitly large chunks.
-        // But here we can cheat. We can display *plaintext* typewriter for the "tip" of the stream?
-        // No, switching between plaintext and markdown causes layout shift.
-
-        // Let's stick to the 50ms debounce BUT ensure we don't hold back data.
-        // Actually, if the user sees big chunks, it means the NETWORK is sending big chunks.
-        // I will implement a visual smoother:
-        // When new text arrives, we target it. We update the DOM *gradually*.
-        // But invalid markdown (unclosed bold) looks bad.
-
-        // BEST COMPROMISE:
-        // Just render it. If it's chunky, it's chunky.
-        // BUT, for "Thinking", it IS plain text. We can definitely typewriter that.
-        // For main text, I will lower debounce to 10ms.
-      }
-      isRendering = false;
-    };
-
-    let lastRenderTime = 0;
+    let thinkingTypewriterInterval: any = null;
+    let lastThinkingLength = 0;
+    let lastTextRenderTime = 0;
 
     const update = async (response: import('../types').ChatResponse, isFinal: boolean = false) => {
-      // 1. Tools
+      // 1. Render Tool Actions
       if (response.actions && response.actions.length > 0) {
-        toolContainer.empty(); // Simple clear/redraw for tools (usually low freq)
+        toolContainer.empty();
         await this.renderToolActions(toolContainer, response.actions);
       }
 
-      // 2. Thinking - with LIVE TYPEWRITER effect
-      if (response.isThinking || (response.thinkingText && response.thinkingText.length > 0)) {
+      // 2. Handle Thinking Block with Typewriter Effect
+      if (response.thinkingText && response.thinkingText.length > 0) {
         thinkingContainer.style.display = 'block';
 
-        if (response.thinkingText && response.thinkingText.length > 0) {
-          thinkingContent.style.display = 'block';
-          dotsContainer.style.display = 'none';
+        // Update target thinking text
+        fullThinkingText = response.thinkingText;
+        thinkingContent.style.display = 'block';
+        dotsContainer.style.display = 'none';
 
-          // LIVE TYPEWRITER: Queue-based character reveal
-          const targetText = response.thinkingText;
-          const currentDisplayed = thinkingContent.innerText.length;
-
-          if (targetText.length > currentDisplayed) {
-            // Start typewriter interval if not already running
-            if (!typeWriterInterval) {
-              typeWriterInterval = setInterval(() => {
-                const current = thinkingContent.innerText;
-                const target = fullThinkingText;
-
-                if (current.length < target.length) {
-                  // Add characters progressively (5 chars per tick for speed)
-                  const charsToAdd = Math.min(5, target.length - current.length);
-                  thinkingContent.innerText = target.substring(0, current.length + charsToAdd);
-                  // Auto-scroll to bottom of thinking container
-                  thinkingContent.scrollTop = thinkingContent.scrollHeight;
-                } else {
-                  // Caught up, clear interval
-                  clearInterval(typeWriterInterval);
-                  typeWriterInterval = null;
-                }
-              }, 20); // 20ms = 50 updates/sec, smooth feel
+        // Start typewriter for thinking if not already running
+        if (!thinkingTypewriterInterval) {
+          thinkingTypewriterInterval = setInterval(() => {
+            if (lastThinkingLength < fullThinkingText.length) {
+              // Add 3-5 chars per frame for smooth but visible progress
+              const charsToAdd = Math.min(5, fullThinkingText.length - lastThinkingLength);
+              thinkingContent.innerText = fullThinkingText.substring(0, lastThinkingLength + charsToAdd);
+              lastThinkingLength += charsToAdd;
+              thinkingContent.scrollTop = thinkingContent.scrollHeight; // Auto-scroll
+            } else if (isFinal) {
+              // Thinking is complete
+              clearInterval(thinkingTypewriterInterval);
+              thinkingTypewriterInterval = null;
+              thinkingContent.innerText = fullThinkingText;
+              thinkingContainer.addClass('thinking-code-block');
             }
-          }
-
-          // Update target text for the interval to chase
-          fullThinkingText = targetText;
-        } else {
-          dotsContainer.style.display = 'flex';
-        }
-
-        if (!response.isThinking && response.thinkingText) {
-          // Done thinking - ensure all text is displayed
-          thinkingContent.innerText = response.thinkingText;
-          if (typeWriterInterval) {
-            clearInterval(typeWriterInterval);
-            typeWriterInterval = null;
-          }
-          dotsContainer.style.display = 'none';
-          thinkingContainer.addClass('thinking-code-block');
+          }, 15); // ~67 updates/sec, creates smooth flowing effect
         }
       }
 
-      // 3. Text (Debounced Markdown)
-      // To fix "big chunks", we minimize debounce time.
+      // 3. Handle Response Text with Debounced Markdown Rendering
       if (response.text && response.text !== fullTextToRender) {
         fullTextToRender = response.text;
 
+        // Render markdown with debounce to avoid too many DOM updates
         const now = Date.now();
-        // Render if final OR > 20ms (Fast updates)
-        if (isFinal || (now - lastRenderTime > 20)) {
+        if (isFinal || (now - lastTextRenderTime > 100)) {
           const tempContainer = createDiv();
           const component = new Component();
           component.load();
@@ -205,7 +135,7 @@ export class MessageRenderer {
           while (tempContainer.firstChild) {
             textContainer.appendChild(tempContainer.firstChild);
           }
-          lastRenderTime = now;
+          lastTextRenderTime = now;
         }
       }
 
