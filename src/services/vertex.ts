@@ -1,4 +1,5 @@
 import { App, TFile, requestUrl, Notice } from 'obsidian';
+import { exec as cpExec } from 'child_process';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
 import { ModelServiceClient } from '@google-cloud/aiplatform';
@@ -10,6 +11,9 @@ export class VertexService {
   private modelId!: string;
   private customContextPrompt: string = '';
   private vertexClient: VertexAI | null = null;
+  private permWeb: boolean = false;
+  private permTerminal: boolean = false;
+  private confirmTerminalDestructive: boolean = true;
 
   private getApiHost(location: string): string {
     const loc = location || 'us-central1';
@@ -20,11 +24,15 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, location: string, modelId: string, customContextPrompt: string }) {
+  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean }) {
     this.serviceAccountJson = settings.serviceAccountJson;
+    this.aiStudioKey = settings.aiStudioKey || '';
     this.location = settings.location;
     this.modelId = settings.modelId;
     this.customContextPrompt = settings.customContextPrompt;
+    this.permWeb = !!settings.permWeb;
+    this.permTerminal = !!settings.permTerminal;
+    this.confirmTerminalDestructive = settings.confirmTerminalDestructive ?? true;
     this.vertexClient = null; // Reset client on settings change
   }
 
@@ -481,102 +489,128 @@ Your actual answer here.`;
         systemInstructionText += `\n\nUSER CUSTOM INSTRUCTIONS:\n${this.customContextPrompt}`;
       }
 
-      const tools = [
+      const functionDeclarations: any[] = [
         {
-          function_declarations: [
-            {
-              name: "list_files",
-              description: "Lists all markdown files in the vault.",
-              parameters: { type: "object", properties: {} },
+          name: "list_files",
+          description: "Lists all markdown files in the vault.",
+          parameters: { type: "object", properties: {} },
+        },
+        {
+          name: 'list_directory',
+          description: 'Lists the contents of a specific directory/folder.',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'The path of the folder to list.' }
             },
-            {
-              name: 'list_directory',
-              description: 'Lists the contents of a specific directory/folder.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string', description: 'The path of the folder to list.' }
-                },
-                required: ['path']
-              }
-            },
-            {
-              name: "read_file",
-              description: "Reads the full content of a specified markdown file.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: {
-                    type: "string",
-                    description: "The absolute path of the file to read.",
-                  },
-                },
-                required: ["path"],
+            required: ['path']
+          }
+        },
+        {
+          name: "read_file",
+          description: "Reads the full content of a specified markdown file.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "The absolute path of the file to read.",
               },
             },
-            {
-              name: "search_content",
-              description:
-                "Searches for a keyword or phrase within all markdown files in the vault.",
-              parameters: {
-                type: "object",
-                properties: {
-                  query: { type: "string", description: "The search term." },
-                },
-                required: ["query"],
+            required: ["path"],
+          },
+        },
+        {
+          name: "search_content",
+          description:
+            "Searches for a keyword or phrase within all markdown files in the vault.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The search term." },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "create_note",
+          description:
+            "Creates a new markdown note with the specified content.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description:
+                  'The path for the new note (e.g., "Summaries/MyNote.md").',
+              },
+              content: {
+                type: "string",
+                description: "The content of the note.",
               },
             },
-            {
-              name: "create_note",
-              description:
-                "Creates a new markdown note with the specified content.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: {
-                    type: "string",
-                    description:
-                      'The path for the new note (e.g., "Summaries/MyNote.md").',
-                  },
-                  content: {
-                    type: "string",
-                    description: "The content of the note.",
-                  },
-                },
-                required: ["path", "content"],
+            required: ["path", "content"],
+          },
+        },
+        {
+          name: "create_folder",
+          description: "Creates a new folder.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "The path for the new folder.",
               },
             },
-            {
-              name: "create_folder",
-              description: "Creates a new folder.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: {
-                    type: "string",
-                    description: "The path for the new folder.",
-                  },
-                },
-                required: ["path"],
+            required: ["path"],
+          },
+        },
+        {
+          name: "delete_file",
+          description: "Deletes a file or folder. Use with caution.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "The path of the file to delete.",
               },
             },
-            {
-              name: "delete_file",
-              description: "Deletes a file or folder. Use with caution.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: {
-                    type: "string",
-                    description: "The path of the file to delete.",
-                  },
-                },
-                required: ['path']
-              }
-            }
-          ]
+            required: ['path']
+          }
         }
       ];
+
+      if (this.permWeb) {
+        functionDeclarations.push({
+          name: "fetch_url",
+          description: "Fetches an HTTP/HTTPS URL and returns text content (truncated to 20KB).",
+          parameters: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "HTTP or HTTPS URL to fetch." },
+            },
+            required: ["url"],
+          },
+        });
+      }
+
+      if (this.permTerminal) {
+        functionDeclarations.push({
+          name: "run_shell_command",
+          description: "Executes a shell command on the host and returns stdout/stderr (truncated).",
+          parameters: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "Command to execute." },
+            },
+            required: ["command"],
+          },
+        });
+      }
+
+      const tools = [{ function_declarations: functionDeclarations }];
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
       let contents: any[] = [];
@@ -666,8 +700,22 @@ Your actual answer here.`;
               result = { status: 'success', message: `File deleted at ${args.path}` };
             } else if (name === 'list_directory') {
               result = await vaultService.listDirectory(args.path);
+            } else if (name === 'fetch_url') {
+              if (!this.permWeb) {
+                throw new Error('Web access is disabled in settings. Enable "Web Access" to allow fetch_url.');
+              }
+              result = await this.fetchUrl(args.url);
+            } else if (name === 'run_shell_command') {
+              if (!this.permTerminal) {
+                throw new Error('Terminal access is disabled in settings. Enable "Terminal Access" to allow commands.');
+              }
+              if (this.confirmTerminalDestructive) {
+                result = { status: 'error', message: 'Terminal commands require disabling "Confirm Terminal Commands" in settings.' };
+              } else {
+                result = await this.runShellCommand(String(args.command || ''));
+              }
             }
-            status = 'success';
+            status = result?.status === 'error' ? 'error' : 'success';
           } catch (err: any) {
             result = { status: 'error', message: err.message };
             status = 'error';
@@ -744,5 +792,65 @@ Your actual answer here.`;
     } catch {
       return false;
     }
+  }
+
+  private async fetchUrl(rawUrl: string): Promise<{ status: string; url: string; statusCode: number; headers: Record<string, string>; body: string; truncated: boolean }> {
+    const url = (rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Only http/https URLs are allowed.');
+    }
+
+    const response = await requestUrl({ url, method: 'GET' });
+    const maxLen = 20000;
+    const bodyText = response.text || '';
+    const truncated = bodyText.length > maxLen;
+
+    return {
+      status: 'success',
+      url,
+      statusCode: response.status,
+      headers: response.headers || {},
+      body: truncated ? bodyText.substring(0, maxLen) : bodyText,
+      truncated,
+    };
+  }
+
+  private async runShellCommand(command: string): Promise<{ status: string; stdout: string; stderr: string; exitCode: number; truncated: boolean }> {
+    const cmd = command.trim();
+    if (!cmd) {
+      throw new Error('Command is empty.');
+    }
+
+    const maxLen = 20000;
+
+    const execPromise = () => new Promise<{ stdout: string; stderr: string; code: number }>((resolve, reject) => {
+      const child = cpExec(cmd, { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        const code = (error as any)?.code ?? 0;
+        if (error && (error as any).killed) {
+          reject(new Error('Command timed out.'));
+          return;
+        }
+        resolve({ stdout, stderr, code });
+      });
+
+      child.on('error', (err) => reject(err));
+    });
+
+    const { stdout, stderr, code } = await execPromise();
+    const out = stdout || '';
+    const err = stderr || '';
+    const combinedLen = out.length + err.length;
+    const truncated = combinedLen > maxLen;
+
+    const trimmedStdout = truncated ? out.substring(0, Math.max(0, maxLen - err.length)) : out;
+    const trimmedStderr = truncated ? err.substring(0, Math.max(0, maxLen - trimmedStdout.length)) : err;
+
+    return {
+      status: code === 0 ? 'success' : 'error',
+      stdout: trimmedStdout,
+      stderr: trimmedStderr,
+      exitCode: code,
+      truncated,
+    };
   }
 }
