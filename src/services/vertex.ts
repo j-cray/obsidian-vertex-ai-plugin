@@ -463,7 +463,7 @@ export class VertexService {
         model: modelId,
       });
 
-      const systemInstructionText = this.customContextPrompt || '';
+      const systemInstructionText = this.customContextPrompt || 'You are Mastermind, an AI assistant for Obsidian with access to the vault.';
 
       const functionDeclarations: any[] = [
         {
@@ -613,12 +613,17 @@ export class VertexService {
           maxOutputTokens: 2048,
         };
 
-        const response = await generativeModel.generateContent({
+        const requestConfig: any = {
           contents,
-          systemInstruction: systemInstructionText,
           tools,
           generationConfig,
-        });
+        };
+
+        if (systemInstructionText && systemInstructionText.trim()) {
+          requestConfig.systemInstruction = systemInstructionText;
+        }
+
+        const response = await generativeModel.generateContent(requestConfig);
 
         const result = response.response;
 
