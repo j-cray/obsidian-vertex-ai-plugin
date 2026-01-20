@@ -38,97 +38,52 @@ var import_obsidian = require("obsidian");
 var import_child_process = require("child_process");
 var import_util = require("util");
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
-var _VertexService = class {
+var VertexService = class {
   constructor(settings) {
-    this.maxOutputTokens = 8192;
-    this.temperature = 0.7;
     this.customContextPrompt = "";
-    this.availableModels = [];
-    // Permissions
-    this.permVaultRead = true;
-    this.permVaultWrite = true;
-    this.permVaultDelete = false;
-    this.permWeb = true;
-    this.permTerminal = false;
-    this.confirmVaultDestructive = true;
-    this.confirmTerminalDestructive = true;
-    // Token management (Vertex AI only)
     this.accessToken = null;
     this.tokenExpiry = 0;
     this.isRefreshingToken = false;
     this.tokenRefreshPromise = null;
     this.updateSettings(settings);
   }
-  static getFallbackModelsFor(provider) {
-    return provider === "aistudio" ? [..._VertexService.AI_STUDIO_FALLBACK_MODELS] : [..._VertexService.VERTEX_FALLBACK_MODELS];
-  }
   updateSettings(settings) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
-    this.authProvider = (_a = settings.authProvider) != null ? _a : "vertex";
     this.serviceAccountJson = settings.serviceAccountJson;
-    this.aiStudioKey = (_b = settings.aiStudioKey) != null ? _b : "";
     this.location = settings.location;
     this.modelId = settings.modelId;
     this.customContextPrompt = settings.customContextPrompt;
-    this.availableModels = (_c = settings.availableModels) != null ? _c : [];
-    this.maxOutputTokens = (_d = settings.maxOutputTokens) != null ? _d : 8192;
-    this.temperature = (_e = settings.temperature) != null ? _e : 0.7;
-    this.permVaultRead = (_f = settings.permVaultRead) != null ? _f : true;
-    this.permVaultWrite = (_g = settings.permVaultWrite) != null ? _g : true;
-    this.permVaultDelete = (_h = settings.permVaultDelete) != null ? _h : false;
-    this.permWeb = (_i = settings.permWeb) != null ? _i : true;
-    this.permTerminal = (_j = settings.permTerminal) != null ? _j : false;
-    this.confirmVaultDestructive = (_k = settings.confirmVaultDestructive) != null ? _k : true;
-    this.confirmTerminalDestructive = (_l = settings.confirmTerminalDestructive) != null ? _l : true;
     this.accessToken = null;
   }
   async getAccessToken() {
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken;
     }
-    if (this.isRefreshingToken && this.tokenRefreshPromise) {
-      return this.tokenRefreshPromise;
+    if (!this.serviceAccountJson) {
+      throw new Error("Service Account JSON not configured.");
     }
-    this.isRefreshingToken = true;
-    this.tokenRefreshPromise = (async () => {
-      try {
-        if (!this.serviceAccountJson) {
-          throw new Error("Service Account JSON not configured.");
-        }
-        let credentials;
-        try {
-          credentials = JSON.parse(this.serviceAccountJson);
-        } catch (e) {
-          throw new Error("Invalid Service Account JSON format.");
-        }
-        if (!credentials.client_email || !credentials.private_key) {
-          throw new Error(
-            "Service Account JSON missing client_email or private_key."
-          );
-        }
-        const token = await this.createSignedJWT(
-          credentials.client_email,
-          credentials.private_key
-        );
-        const response = await (0, import_obsidian.requestUrl)({
-          url: "https://oauth2.googleapis.com/token",
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
-        });
-        if (response.status !== 200) {
-          throw new Error(`Failed to refresh token: ${response.text}`);
-        }
-        const data = response.json;
-        this.accessToken = data.access_token;
-        this.tokenExpiry = Date.now() + (data.expires_in - 120) * 1e3;
-        return this.accessToken;
-      } finally {
-        this.isRefreshingToken = false;
-        this.tokenRefreshPromise = null;
-      }
-    })();
-    return this.tokenRefreshPromise;
+    let credentials;
+    try {
+      credentials = JSON.parse(this.serviceAccountJson);
+    } catch (e) {
+      throw new Error("Invalid Service Account JSON format.");
+    }
+    if (!credentials.client_email || !credentials.private_key) {
+      throw new Error("Service Account JSON missing client_email or private_key.");
+    }
+    const token = await this.createSignedJWT(credentials.client_email, credentials.private_key);
+    const response = await (0, import_obsidian.requestUrl)({
+      url: "https://oauth2.googleapis.com/token",
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
+    });
+    if (response.status !== 200) {
+      throw new Error(`Failed to refresh token: ${response.text}`);
+    }
+    const data = response.json;
+    this.accessToken = data.access_token;
+    this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1e3;
+    return this.accessToken;
   }
   async createSignedJWT(email, privateKeyPem) {
     const header = { alg: "RS256", typ: "JWT" };
@@ -204,365 +159,121 @@ var _VertexService = class {
     const host = location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`;
     return `https://${host}/v1/projects/${this.getProjectId()}/locations/${location}`;
   }
-  getProviderFallbackModels() {
-    return _VertexService.getFallbackModelsFor(this.authProvider);
-  }
-  mergeModelLists(primary, fallback) {
-    const merged = [...primary];
-    fallback.forEach((model) => {
-      if (!merged.includes(model)) {
-        merged.push(model);
-      }
-    });
-    return merged;
-  }
-  setAvailableModelList(models) {
-    const unique = Array.from(new Set(models.filter(Boolean)));
-    this.availableModels = unique;
-    if (unique.length > 0 && !unique.includes(this.modelId)) {
-      this.modelId = unique[0];
-    }
-    return unique;
-  }
-  ensureModelSelection() {
-    if (!this.availableModels || this.availableModels.length === 0) {
-      this.availableModels = this.getProviderFallbackModels();
-    }
-    if (!this.modelId || !this.availableModels.includes(this.modelId)) {
-      const fallback = this.getProviderFallbackModels();
-      this.modelId = this.availableModels[0] || fallback[0] || _VertexService.VERTEX_FALLBACK_MODELS[0];
-    }
-    return this.modelId;
-  }
   async listModels() {
-    if (this.authProvider === "aistudio") {
-      const fallback = this.getProviderFallbackModels();
-      if (!this.aiStudioKey) {
-        new import_obsidian.Notice(
-          "Mastermind: AI Studio API key missing. Using default model list."
-        );
-        return this.setAvailableModelList(fallback);
-      }
-      try {
-        const collected = [];
-        let pageToken;
-        do {
-          const url = new URL(
-            "https://generativelanguage.googleapis.com/v1beta/models"
-          );
-          url.searchParams.set("pageSize", "100");
-          url.searchParams.set("key", this.aiStudioKey);
-          if (pageToken) {
-            url.searchParams.set("pageToken", pageToken);
-          }
-          const response = await (0, import_obsidian.requestUrl)({
-            url: url.toString(),
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": this.aiStudioKey
-            }
-          });
-          if (response.status !== 200 || !Array.isArray(response.json.models)) {
-            console.warn(
-              `Mastermind: AI Studio list models returned status ${response.status}`
-            );
-            break;
-          }
-          response.json.models.forEach((model) => {
-            var _a;
-            const name = (_a = model.name) == null ? void 0 : _a.split("/").pop();
-            const supportsContent = Array.isArray(
-              model.supportedGenerationMethods
-            ) ? model.supportedGenerationMethods.some(
-              (method) => [
-                "generateContent",
-                "generateMessage",
-                "streamGenerateContent"
-              ].includes(method)
-            ) : true;
-            if (name && !name.includes("embedding") && !name.includes("moderation") && supportsContent) {
-              collected.push(name);
-            }
-          });
-          pageToken = response.json.nextPageToken;
-        } while (pageToken);
-        const merged = collected.length > 0 ? this.mergeModelLists(collected, fallback) : fallback;
-        new import_obsidian.Notice(`Mastermind: AI Studio models ready (${merged.length}).`);
-        return this.setAvailableModelList(merged);
-      } catch (error) {
-        console.error("Mastermind: Error fetching AI Studio models", error);
-      }
-      new import_obsidian.Notice(
-        "Mastermind: AI Studio model discovery failed. Using defaults."
-      );
-      return this.setAvailableModelList(fallback);
-    }
     const accessToken = await this.getAccessToken();
-    const projectId = this.getProjectId();
-    const discoveryLocation = this.location === "global" || !this.location ? "us-central1" : this.location;
-    new import_obsidian.Notice(
-      `Mastermind: Discovering models... (Project: ${projectId}, Location: ${discoveryLocation})`
-    );
-    const fallbackModels = this.getProviderFallbackModels();
-    const foundModels = /* @__PURE__ */ new Set();
-    const safeFetch = async (url, label) => {
-      try {
-        console.log(`Mastermind: Fetching ${label} from ${url}`);
-        const response = await (0, import_obsidian.requestUrl)({
-          url,
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        });
-        if (response.status === 200 && response.json.models) {
-          return response.json.models;
-        } else if (response.status === 200 && response.json.publisherModels) {
-          return response.json.publisherModels;
-        } else {
-          console.warn(
-            `Mastermind: ${label} returned status ${response.status}`
-          );
-          return [];
-        }
-      } catch (error) {
-        console.error(`Mastermind: Error fetching ${label}:`, error);
-        return [];
-      }
-    };
-    const centralPublisherUrl = `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectId}/locations/us-central1/publishers/google/models`;
-    const centralPublisherModels = await safeFetch(
-      centralPublisherUrl,
-      "Publisher Models (us-central1)"
-    );
-    let publisherModels = [...centralPublisherModels];
-    if (discoveryLocation !== "us-central1") {
-      const regionalPublisherUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/publishers/google/models`;
-      const regionalPublisherModels = await safeFetch(
-        regionalPublisherUrl,
-        `Publisher Models (${discoveryLocation})`
-      );
-      if (regionalPublisherModels.length === 0) {
-        console.warn(
-          `Mastermind: No publisher models discovered in ${discoveryLocation}. Using us-central1 list only.`
-        );
-      } else {
-        publisherModels.push(...regionalPublisherModels);
-      }
-    }
-    publisherModels.forEach((m) => {
-      const name = m.name.split("/").pop();
-      if (name.includes("gemini") || name.includes("bison") || name.includes("unicorn")) {
-        foundModels.add(name);
-      }
-    });
-    if (projectId) {
-      const projectUrl = `https://${discoveryLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${discoveryLocation}/models`;
-      const projectModels = await safeFetch(projectUrl, "Project Models");
-      projectModels.forEach((m) => {
-        const name = m.name.split("/").pop();
-        foundModels.add(name);
-      });
-    }
-    if (foundModels.size === 0) {
-      new import_obsidian.Notice(`Mastermind: No models found via API. Using fallback list.`);
-      return this.setAvailableModelList(fallbackModels);
-    }
-    fallbackModels.forEach((m) => foundModels.add(m));
-    const finalList = Array.from(foundModels).sort();
-    new import_obsidian.Notice(
-      `Mastermind: Discovery complete. Available models: ${finalList.length}`
-    );
-    return this.setAvailableModelList(finalList);
-  }
-  async *chat(prompt, context, vaultService, history = [], images = [], signal) {
-    console.log("Mastermind: Service - chat called");
-    const accessToken = await this.getAccessToken();
-    console.log("Mastermind: Service - token retrieved");
     const projectId = JSON.parse(this.serviceAccountJson).project_id;
     const location = this.location || "us-central1";
     try {
-      yield* this.chatInternal(
-        prompt,
-        context,
-        vaultService,
-        history,
-        images,
-        accessToken,
-        projectId,
-        location,
-        "",
-        "",
-        0,
-        signal
-      );
-    } catch (error) {
-      if (signal == null ? void 0 : signal.aborted)
-        return;
-      const isConfigError = error.message.includes("404") || error.message.includes("not found") || error.message.includes("400");
-      if (location !== "us-central1" && isConfigError) {
-        console.log(
-          `Mastermind: Chat failed in ${location} (Error: ${error.message}). Falling back to us-central1 + Safe Model...`
-        );
-        this.setAvailableModelList(this.getProviderFallbackModels());
-        yield* this.chatInternal(
-          prompt,
-          context,
-          vaultService,
-          history,
-          images,
-          accessToken,
-          projectId,
-          "us-central1",
-          "",
-          "",
-          0,
-          signal
-        );
-      } else if (error.message.includes("400")) {
-        console.log(
-          "Mastermind: 400 Bad Request. Retrying with provider fallback model..."
-        );
-        this.setAvailableModelList(this.getProviderFallbackModels());
-        yield* this.chatInternal(
-          prompt,
-          context,
-          vaultService,
-          history,
-          images,
-          accessToken,
-          projectId,
-          location,
-          "",
-          "",
-          0,
-          signal
-        );
-      } else {
-        throw error;
+      const response = await (0, import_obsidian.requestUrl)({
+        url: `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/models?filter=labels.google-cloud-model-garden=true&pageSize=100`,
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (response.status === 200) {
+        const data = response.json;
+        if (data.models && data.models.length > 0) {
+          const fetched = data.models.map((m) => m.displayName).filter((name) => typeof name === "string");
+          const unique = [...new Set(fetched)].sort();
+          if (unique.length > 0) {
+            return unique;
+          }
+          throw new Error("Vertex AI returned no models.");
+        }
+        throw new Error("Vertex AI returned no models.");
       }
+      throw new Error(`Vertex AI listModels failed with status ${response.status}`);
+    } catch (error) {
+      console.error("Mastermind: Failed to list models via API.", error);
+      throw error;
     }
   }
-  async *chatInternal(prompt, context, vaultService, history = [], images = [], accessToken, projectId, location, initialText = "", initialThinking = "", recursionDepth = 0, signal) {
-    var _a, _b;
-    if (recursionDepth > 30) {
-      yield {
-        text: "\n\n**Error:** Max recursion limit reached (30 steps). The model is looping or the task is too complex.",
-        actions: []
-      };
-      return;
-    }
-    if (signal == null ? void 0 : signal.aborted) {
-      throw new Error("AbortError");
-    }
-    const modelId = this.ensureModelSelection();
+  async chat(prompt, context, vaultService, history = [], images = []) {
+    var _a;
+    const accessToken = await this.getAccessToken();
+    const projectId = JSON.parse(this.serviceAccountJson).project_id;
+    const modelId = this.modelId || "gemini-2.0-flash-exp";
     const isClaude = modelId.startsWith("claude");
     const isEndpoint = /^\d+$/.test(modelId) || modelId.includes("/endpoints/");
-    const effectiveLocation = location || "us-central1";
-    if (isEndpoint || isClaude || modelId.includes("imagen")) {
-      let url2 = "";
-      let body2 = {};
-      if (isEndpoint) {
-        const endpointResource = modelId.includes("/") ? modelId : `projects/${projectId}/locations/${effectiveLocation}/endpoints/${modelId}`;
-        const host = effectiveLocation === "global" ? "aiplatform.googleapis.com" : `${effectiveLocation}-aiplatform.googleapis.com`;
-        const useSSE = !isEndpoint;
-        url2 = `https://${host}/v1/${endpointResource}:${isEndpoint ? "predict" : "streamGenerateContent"}${useSSE ? "?alt=sse" : ""}`;
-        body2 = {
-          instances: [
-            {
-              prompt: `System: You are Mastermind.
+    const location = this.location || "us-central1";
+    if (isEndpoint) {
+      const endpointResource = modelId.includes("/") ? modelId : `projects/${projectId}/locations/${location}/endpoints/${modelId}`;
+      const url2 = `https://${location}-aiplatform.googleapis.com/v1/${endpointResource}:predict`;
+      const body = {
+        instances: [
+          {
+            prompt: `System: You are Mastermind.
 Context: ${context}
 
 User: ${prompt}
 Assistant:`
-            }
-          ],
-          parameters: {
-            temperature: this.temperature,
-            maxOutputTokens: this.maxOutputTokens,
-            topP: 0.95
+            // Some models treat "messages" list differently.
+            // For broad compatibility with raw endpoints, we construct a single prompt string.
+            // Ideally, we'd detect the model type, but for "generic endpoint" support, text completion is safest default.
           }
-        };
-      } else if (isClaude) {
-        url2 = `${this.getBaseUrl(effectiveLocation)}/publishers/anthropic/models/${modelId}:streamRawPredict`;
-        const messages = history.map((h) => ({
-          role: h.role === "model" ? "assistant" : "user",
-          content: h.parts[0].text
-        }));
-        messages.push({
-          role: "user",
-          content: `Context:
-${context}
-
-Question: ${prompt}`
-        });
-        body2 = {
-          anthropic_version: "vertex-2023-10-16",
-          messages,
-          system: `You are Mastermind. ${this.customContextPrompt || ""} Be concise.`,
-          max_tokens: this.maxOutputTokens,
-          temperature: this.temperature,
-          stream: false
-        };
-      } else {
-        url2 = `${this.getBaseUrl(effectiveLocation)}/publishers/google/models/${modelId}:predict`;
-        body2 = {
-          instances: [{ prompt }],
-          parameters: { sampleCount: 1 }
-        };
-        new import_obsidian.Notice("Mastermind: Generating image...");
-      }
+        ],
+        parameters: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+          topP: 0.95
+        }
+      };
       const response = await (0, import_obsidian.requestUrl)({
         url: url2,
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(body2)
+        body: JSON.stringify(body)
       });
-      if (response.status !== 200)
-        throw new Error(`API Error ${response.status}: ${response.text}`);
-      const data = response.json;
-      if (modelId.includes("imagen")) {
-        if ((_b = (_a = data.predictions) == null ? void 0 : _a[0]) == null ? void 0 : _b.bytesBase64Encoded) {
-          const link = await vaultService.saveImage(
-            data.predictions[0].bytesBase64Encoded
-          );
-          yield {
-            text: `Here is your generated image:
-
-${link}`,
-            actions: []
-          };
-          return;
-        }
-        throw new Error("No image data returned.");
+      if (response.status !== 200) {
+        throw new Error(`Endpoint Error ${response.status}: ${response.text}`);
       }
-      const text = isEndpoint ? data.predictions[0].content : data.content ? data.content[0].text : JSON.stringify(data);
-      yield { text, actions: [] };
-      return;
+      const data = response.json;
+      const pred = data.predictions[0];
+      if (typeof pred === "string")
+        return pred;
+      if (pred.content)
+        return pred.content;
+      return JSON.stringify(pred);
     }
-    const isGemini3 = modelId.includes("gemini-3");
-    const apiVersion = isGemini3 || modelId.includes("preview") || modelId.includes("exp") || modelId.includes("beta") ? "v1beta1" : "v1";
-    const runLocation = isGemini3 ? "global" : effectiveLocation;
-    let url;
-    let authHeaders;
-    if (this.authProvider === "aistudio") {
-      url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelId}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.aiStudioKey)}`;
-      authHeaders = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": this.aiStudioKey
+    if (isClaude) {
+      const url2 = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/anthropic/models/${modelId}:streamRawPredict`;
+      const messages = history.map((h) => ({
+        role: h.role === "model" ? "assistant" : "user",
+        content: h.parts[0].text
+        // Simplify: previous parts usually just text
+      }));
+      messages.push({ role: "user", content: `Context:
+${context}
+
+Question: ${prompt}` });
+      const body = {
+        anthropic_version: "vertex-2023-10-16",
+        messages,
+        system: `You are Mastermind. ${this.customContextPrompt || ""} Be concise.`,
+        max_tokens: 4096,
+        stream: false
       };
-    } else {
-      url = `${this.getBaseUrl(runLocation).replace("/v1/", `/${apiVersion}/`)}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`;
-      authHeaders = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`
-      };
+      const response = await (0, import_obsidian.requestUrl)({
+        url: url2,
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        body: JSON.stringify(body)
+      });
+      if (response.status !== 200) {
+        throw new Error(`Claude API Error ${response.status}: ${response.text}`);
+      }
+      const data = response.json;
+      return data.content ? data.content[0].text : JSON.stringify(data);
     }
+    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
     let systemInstructionText = `You are "Mastermind", a highly capable AI assistant for Obsidian.
 You have access to the user's notes and knowledge vault.
 Be concise, professional, and insightful.
@@ -582,25 +293,22 @@ ${this.customContextPrompt}`;
     }
     const tools = [
       {
-        functionDeclarations: [
-          {
-            name: "generate_image",
-            description: "Generates an image based on a prompt using Imagen 3. Use this when the user asks to draw, paint, or create an image.",
-            parameters: {
-              type: "object",
-              properties: {
-                prompt: {
-                  type: "string",
-                  description: "The visual description of the image to generate."
-                }
-              },
-              required: ["prompt"]
-            }
-          },
+        function_declarations: [
           {
             name: "list_files",
             description: "Lists all markdown files in the vault.",
             parameters: { type: "object", properties: {} }
+          },
+          {
+            name: "list_directory",
+            description: "Lists the contents of a specific directory/folder.",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "The path of the folder to list." }
+              },
+              required: ["path"]
+            }
           },
           {
             name: "list_directory",
@@ -686,529 +394,99 @@ ${this.customContextPrompt}`;
               },
               required: ["path"]
             }
-          },
-          {
-            name: "move_file",
-            description: "Moves or renames a file or folder.",
-            parameters: {
-              type: "object",
-              properties: {
-                oldPath: { type: "string", description: "The current path." },
-                newPath: { type: "string", description: "The new path." }
-              },
-              required: ["oldPath", "newPath"]
-            }
-          },
-          {
-            name: "run_terminal_command",
-            description: "Executes a shell command on the host OS. Use with caution.",
-            parameters: {
-              type: "object",
-              properties: {
-                command: {
-                  type: "string",
-                  description: "The shell command to execute."
-                }
-              },
-              required: ["command"]
-            }
-          },
-          {
-            name: "fetch_url",
-            description: "Fetches the content of a URL. Useful for reading documentation or articles.",
-            parameters: {
-              type: "object",
-              properties: {
-                url: {
-                  type: "string",
-                  description: "The absolute URL to fetch."
-                }
-              },
-              required: ["url"]
-            }
-          },
-          {
-            name: "append_to_note",
-            description: "Appends content to the end of a note.",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                content: { type: "string" }
-              },
-              required: ["path", "content"]
-            }
-          },
-          {
-            name: "prepend_to_note",
-            description: "Prepends content to the start of a note (after frontmatter if present).",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                content: { type: "string" }
-              },
-              required: ["path", "content"]
-            }
-          },
-          {
-            name: "update_section",
-            description: "Updates a specific section of a note under a given header.",
-            parameters: {
-              type: "object",
-              properties: {
-                path: { type: "string" },
-                header: {
-                  type: "string",
-                  description: "The exact header text (without #)"
-                },
-                content: {
-                  type: "string",
-                  description: "The new content for the section"
-                }
-              },
-              required: ["path", "header", "content"]
-            }
-          },
-          {
-            name: "get_tags",
-            description: "Gets all unique tags in the vault.",
-            parameters: { type: "object", properties: {} }
-          },
-          {
-            name: "get_links",
-            description: "Gets all outgoing links from a specific note.",
-            parameters: {
-              type: "object",
-              properties: { path: { type: "string" } },
-              required: ["path"]
-            }
           }
         ]
-      },
-      {
-        googleSearch: {}
       }
     ];
-    let contents = history.map((item) => ({
-      role: item.role,
-      parts: item.parts
-    }));
-    const pParts = [
-      { text: `Context from vault:
+    let contents = [...history];
+    const parts = [{ text: `Context from vault:
 ${context}
 
-User Question: ${prompt}` }
-    ];
+User Question: ${prompt}` }];
     for (const img of images) {
-      pParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
-    }
-    contents.push({ role: "user", parts: pParts });
-    const body = {
-      contents,
-      system_instruction: { parts: [{ text: systemInstructionText }] },
-      tools,
-      generationConfig: {
-        temperature: this.temperature,
-        maxOutputTokens: this.maxOutputTokens
-      },
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_ONLY_HIGH"
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_ONLY_HIGH"
+      parts.push({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.data
         }
-      ]
-    };
-    console.log(`Mastermind: Starting stream request to ${url}`);
-    let stream;
-    try {
-      stream = this.streamRequest(url, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify(body),
-        signal
       });
-    } catch (e) {
-      console.error("Mastermind: Failed to initiate stream", e);
-      throw e;
     }
-    let buffer = "";
-    let accumulatedText = initialText;
-    let accumulatedThinking = initialThinking;
-    let isThinking = false;
-    let accumulatedFunctions = [];
-    try {
-      let buffer2 = "";
-      for await (const chunk of stream) {
-        buffer2 += chunk;
-        let boundary = buffer2.indexOf("\n");
-        while (boundary !== -1) {
-          const line = buffer2.substring(0, boundary).trim();
-          buffer2 = buffer2.substring(boundary + 1);
-          boundary = buffer2.indexOf("\n");
-          if (!line || line.startsWith(":"))
-            continue;
-          const jsonStr = line.replace(/^data:\s*/, "").trim();
-          if (!jsonStr)
-            continue;
-          try {
-            const data = JSON.parse(jsonStr);
-            const candidates = data.candidates;
-            if (candidates && candidates[0]) {
-              const candidate = candidates[0];
-              if (candidate.content && candidate.content.parts) {
-                for (const part of candidate.content.parts) {
-                  if (part.text) {
-                    let textPart = part.text;
-                    let remaining = textPart;
-                    while (remaining.length > 0) {
-                      if (!isThinking) {
-                        const match = remaining.match(/```thinking/i);
-                        if (match && match.index !== void 0) {
-                          const startIdx = match.index;
-                          accumulatedText += remaining.substring(0, startIdx);
-                          remaining = remaining.substring(
-                            startIdx + match[0].length
-                          );
-                          isThinking = true;
-                          console.log("Mastermind: Thinking block STARTED");
-                        } else {
-                          accumulatedText += remaining;
-                          remaining = "";
-                        }
-                      } else {
-                        const endIdx = remaining.indexOf("```");
-                        if (endIdx !== -1) {
-                          const thoughtChunk = remaining.substring(0, endIdx);
-                          accumulatedThinking += thoughtChunk;
-                          remaining = remaining.substring(endIdx + 3);
-                          isThinking = false;
-                          console.log(
-                            "Mastermind: Thinking block ENDED. Content length:",
-                            thoughtChunk.length
-                          );
-                        } else {
-                          accumulatedThinking += remaining;
-                          remaining = "";
-                        }
-                      }
-                    }
-                    yield {
-                      text: accumulatedText,
-                      isThinking,
-                      thinkingText: accumulatedThinking,
-                      actions: []
-                    };
-                  } else if (part.functionCall) {
-                    accumulatedFunctions.push(part.functionCall);
-                  }
-                }
-              }
-            }
-          } catch (e) {
-          }
+    contents.push({ role: "user", parts });
+    for (let i = 0; i < 5; i++) {
+      const body = {
+        contents,
+        system_instruction: { parts: [{ text: systemInstructionText }] },
+        tools,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+      };
+      const response = await (0, import_obsidian.requestUrl)({
+        url,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(body)
+      });
+      if (response.status !== 200) {
+        throw new Error(`Vertex AI Error ${response.status}: ${response.text}`);
+      }
+      const data = response.json;
+      if (!data.candidates || data.candidates.length === 0) {
+        if ((_a = data.promptFeedback) == null ? void 0 : _a.blockReason) {
+          throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
         }
+        throw new Error("No candidates returned from Vertex AI.");
       }
-    } catch (e) {
-      console.error("Mastermind: Streaming Loop Error", e);
-      throw e;
-    }
-    if (accumulatedFunctions.length > 0) {
-      const functionResponseParts = [];
-      const executedActions = [];
-      const modelParts = [];
-      if (accumulatedText && accumulatedText.trim()) {
-        modelParts.push({ text: accumulatedText });
+      const candidate = data.candidates[0];
+      if (candidate.finishReason === "SAFETY") {
+        throw new Error("Response blocked due to safety settings.");
       }
-      for (const fc of accumulatedFunctions) {
-        modelParts.push({ functionCall: fc });
+      if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        throw new Error("Received empty content from Vertex AI.");
       }
-      contents.push({ role: "model", parts: modelParts });
-      for (const funcCall of accumulatedFunctions) {
+      const part = candidate.content.parts[0];
+      if (part.functionCall) {
+        const funcCall = part.functionCall;
         const { name, args } = funcCall;
         let result;
-        yield {
-          text: accumulatedText,
-          thinkingText: accumulatedThinking,
-          actions: [{ tool: name, input: args, status: "pending" }]
-        };
         try {
-          if (name === "generate_image") {
-            new import_obsidian.Notice(
-              `Mastermind: Switching to Imagen 3 for "${args.prompt}"...`
-            );
-            const imagenLink = await this.generateImageInternal(
-              args.prompt,
-              accessToken,
-              projectId,
-              location,
-              vaultService
-            );
-            result = {
-              status: "success",
-              image_link: imagenLink,
-              message: "Image generated successfully."
-            };
-          } else if (name === "list_files" || name === "read_file" || name === "search_content" || name === "list_directory" || name === "get_tags" || name === "get_links") {
-            if (!this.permVaultRead) {
-              result = {
-                status: "error",
-                message: "Permission denied: Vault read access is disabled in settings."
-              };
-            } else {
-              if (name === "list_files") {
-                result = await vaultService.listMarkdownFiles();
-              } else if (name === "read_file") {
-                result = await vaultService.getFileContent(args.path);
-              } else if (name === "search_content") {
-                result = await vaultService.searchVault(args.query);
-              } else if (name === "list_directory") {
-                result = await vaultService.listFolder(args.path);
-              } else if (name === "get_tags") {
-                const tags = await vaultService.getTags();
-                result = { status: "success", tags };
-              } else if (name === "get_links") {
-                const links = await vaultService.getLinks(args.path);
-                result = { status: "success", links };
-              }
-            }
-          } else if (name === "create_note" || name === "create_folder" || name === "move_file" || name === "append_to_note" || name === "prepend_to_note" || name === "update_section") {
-            if (!this.permVaultWrite) {
-              result = {
-                status: "error",
-                message: "Permission denied: Vault write access is disabled in settings."
-              };
-            } else {
-              if (name === "create_note") {
-                await vaultService.createNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Note created at ${args.path}`
-                };
-              } else if (name === "create_folder") {
-                await vaultService.createFolder(args.path);
-                result = {
-                  status: "success",
-                  message: `Folder created at ${args.path}`
-                };
-              } else if (name === "move_file") {
-                await vaultService.moveFile(args.oldPath, args.newPath);
-                result = {
-                  status: "success",
-                  message: `Moved ${args.oldPath} to ${args.newPath}`
-                };
-              } else if (name === "append_to_note") {
-                await vaultService.appendToNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Appended content to ${args.path}`
-                };
-              } else if (name === "prepend_to_note") {
-                await vaultService.prependToNote(args.path, args.content);
-                result = {
-                  status: "success",
-                  message: `Prepended content to ${args.path}`
-                };
-              } else if (name === "update_section") {
-                await vaultService.updateNoteSection(
-                  args.path,
-                  args.header,
-                  args.content
-                );
-                result = {
-                  status: "success",
-                  message: `Updated section "${args.header}" in ${args.path}`
-                };
-              }
-            }
+          if (name === "list_files") {
+            result = await vaultService.listMarkdownFiles();
+          } else if (name === "read_file") {
+            result = await vaultService.getFileContent(args.path);
+          } else if (name === "search_content") {
+            result = await vaultService.searchVault(args.query);
+          } else if (name === "create_note") {
+            await vaultService.createNote(args.path, args.content);
+            result = { status: "success", message: `Note created at ${args.path}` };
+          } else if (name === "create_folder") {
+            await vaultService.createFolder(args.path);
+            result = { status: "success", message: `Folder created at ${args.path}` };
           } else if (name === "delete_file") {
-            if (!this.permVaultDelete) {
-              result = {
-                status: "error",
-                message: "Permission denied: Vault delete access is disabled in settings."
-              };
-            } else {
-              if (this.confirmVaultDestructive && vaultService.app.plugins.getPlugin(
-                "obsidian-vertex-ai-mastermind"
-              ).settings.confirmVaultDestructive) {
-                result = {
-                  status: "error",
-                  message: "Vault deletions require confirmation. Please enable this manually or disable confirmation in settings."
-                };
-              } else {
-                await vaultService.deleteFile(args.path);
-                result = {
-                  status: "success",
-                  message: `File deleted at ${args.path}`
-                };
-              }
-            }
-          } else if (name === "run_terminal_command") {
-            if (!this.permTerminal) {
-              result = {
-                status: "error",
-                message: "Permission denied: Terminal access is disabled in settings."
-              };
-            } else {
-              if (this.confirmTerminalDestructive && vaultService.app.plugins.getPlugin(
-                "obsidian-vertex-ai-mastermind"
-              ).settings.confirmTerminalDestructive) {
-                result = {
-                  status: "error",
-                  message: "Terminal commands require confirmation. Disable confirmation in settings."
-                };
-              } else {
-                try {
-                  const { stdout, stderr } = await execAsync(args.command);
-                  result = {
-                    status: "success",
-                    stdout,
-                    stderr
-                  };
-                } catch (e) {
-                  result = {
-                    status: "error",
-                    message: e.message,
-                    stderr: e.stderr
-                  };
-                }
-              }
-            }
-          } else if (name === "fetch_url") {
-            if (!this.permWeb) {
-              result = {
-                status: "error",
-                message: "Permission denied: Web access is disabled in settings."
-              };
-            } else {
-              try {
-                const response = await (0, import_obsidian.requestUrl)({ url: args.url });
-                const text = response.text.substring(0, 1e4);
-                result = {
-                  status: "success",
-                  content_snippet: text,
-                  full_length: response.text.length
-                };
-              } catch (e) {
-                result = { status: "error", message: e.message };
-              }
-            }
-          } else {
-            result = { status: "error", message: `Unknown tool: ${name}` };
+            await vaultService.deleteFile(args.path);
+            result = { status: "success", message: `File deleted at ${args.path}` };
+          } else if (name === "list_directory") {
+            result = await vaultService.listDirectory(args.path);
           }
-        } catch (e) {
-          result = { status: "error", message: e.message };
+        } catch (err) {
+          result = { status: "error", message: err.message };
         }
-        executedActions.push({
-          tool: name,
-          input: args,
-          output: result,
-          status: result.status
+        contents.push(candidate.content);
+        contents.push({
+          role: "function",
+          parts: [{
+            functionResponse: {
+              name,
+              response: { name, content: result }
+            }
+          }]
         });
-        functionResponseParts.push({
-          functionResponse: { name, response: { content: result } }
-        });
+      } else {
+        return part.text;
       }
-      contents.push({ role: "user", parts: functionResponseParts });
-      yield* this.chatInternal(
-        prompt,
-        context,
-        vaultService,
-        contents,
-        [],
-        accessToken,
-        projectId,
-        location,
-        accumulatedText,
-        accumulatedThinking,
-        recursionDepth + 1,
-        signal
-      );
     }
-  }
-  // Helper: Generate Image (Imagen 3)
-  async generateImageInternal(prompt, accessToken, projectId, location, vaultService) {
-    const modelId = "imagen-3.0-generate-001";
-    const url = `${this.getBaseUrl(location)}/publishers/google/models/${modelId}:predict`;
-    const body = {
-      instances: [{ prompt }],
-      parameters: {
-        sampleCount: 1
-      }
-    };
-    const response = await (0, import_obsidian.requestUrl)({
-      url,
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
-    if (response.status !== 200) {
-      throw new Error(`Imagen Error ${response.status}: ${response.text}`);
-    }
-    const data = response.json;
-    if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
-      const base64 = data.predictions[0].bytesBase64Encoded;
-      return await vaultService.saveImage(base64);
-    }
-    throw new Error("No image data returned from Imagen.");
-  }
-  // Node.js HTTPS Streaming Helper
-  async *streamRequest(urlStr, options) {
-    const https = require("https");
-    const { URL: URL2 } = require("url");
-    const url = new URL2(urlStr);
-    const reqOptions = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname + url.search,
-      method: options.method,
-      headers: options.headers,
-      signal: options.signal
-    };
-    const queue = new AsyncQueue();
-    const req = https.request(reqOptions, (res) => {
-      if (res.statusCode && res.statusCode >= 300) {
-        let errorBody = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk) => {
-          errorBody += chunk;
-        });
-        res.on("end", () => {
-          console.error(
-            `Mastermind: HTTPS Error ${res.statusCode} Body:`,
-            errorBody
-          );
-          queue.fail(new Error(`HTTP Error ${res.statusCode}: ${errorBody}`));
-        });
-        return;
-      }
-      res.setEncoding("utf8");
-      res.on("data", (chunk) => {
-        console.log(`Mastermind: HTTPS chunk received (${chunk.length} bytes)`);
-        queue.push(chunk);
-      });
-      res.on("end", () => {
-        console.log("Mastermind: HTTPS stream ended");
-        queue.close();
-      });
-      res.on("error", (err) => {
-        console.error("Mastermind: HTTPS stream error", err);
-        queue.fail(err);
-      });
-    });
-    req.on("error", (err) => queue.fail(err));
-    req.write(options.body);
-    req.end();
-    yield* queue;
+    throw new Error("Maximum tool use iterations reached.");
   }
   // Helper method to validate JSON
   validateJSON(json) {
@@ -1218,85 +496,6 @@ User Question: ${prompt}` }
     } catch (e) {
       return false;
     }
-  }
-  // End of class
-};
-var VertexService = _VertexService;
-VertexService.VERTEX_FALLBACK_MODELS = [
-  "gemini-2.0-flash-001",
-  "gemini-2.0-flash-lite-preview-02-05",
-  "gemini-2.0-pro-exp-02-05",
-  "gemini-1.5-pro",
-  "gemini-1.5-flash",
-  "gemini-3-pro-preview",
-  "gemini-3-flash-preview",
-  "gemini-2.0-flash-thinking-exp-01-21",
-  "imagen-3.0-generate-001",
-  "imagen-3.0-fast-generate-001"
-];
-VertexService.AI_STUDIO_FALLBACK_MODELS = [
-  "gemini-2.0-flash-001",
-  "gemini-2.0-flash-lite-preview-02-05",
-  "gemini-1.5-pro",
-  "gemini-1.5-flash",
-  "gemini-2.0-pro-exp-02-05",
-  "gemini-2.0-flash-thinking-exp-01-21"
-];
-var AsyncQueue = class {
-  constructor() {
-    this.queue = [];
-    this.resolveNext = null;
-    this.rejectNext = null;
-    this.closed = false;
-    this.error = null;
-  }
-  push(value) {
-    if (this.closed)
-      return;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value, done: false });
-    } else {
-      this.queue.push(value);
-    }
-  }
-  close() {
-    this.closed = true;
-    if (this.resolveNext) {
-      const resolve = this.resolveNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      resolve({ value: void 0, done: true });
-    }
-  }
-  fail(err) {
-    this.error = err;
-    if (this.rejectNext) {
-      const reject = this.rejectNext;
-      this.resolveNext = null;
-      this.rejectNext = null;
-      reject(err);
-    }
-  }
-  [Symbol.asyncIterator]() {
-    return {
-      next: () => {
-        if (this.error)
-          return Promise.reject(this.error);
-        if (this.queue.length > 0) {
-          return Promise.resolve({ value: this.queue.shift(), done: false });
-        }
-        if (this.closed) {
-          return Promise.resolve({ value: void 0, done: true });
-        }
-        return new Promise((resolve, reject) => {
-          this.resolveNext = resolve;
-          this.rejectNext = reject;
-        });
-      }
-    };
   }
 };
 
@@ -1847,10 +1046,8 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
     container.addClass("chat-view");
     this.toolbarEl = container.createDiv("chat-toolbar");
     const modelContainer = this.toolbarEl.createDiv("model-picker-container");
-    this.modelLabel = modelContainer.createEl("span", {
-      cls: "model-indicator"
-    });
-    this.modelLabel.innerText = this.plugin.settings.modelId || "gemini-2.0-flash-001";
+    this.modelLabel = modelContainer.createEl("span", { cls: "model-indicator" });
+    this.modelLabel.innerText = this.plugin.settings.modelId || "gemini-2.0-flash-exp";
     this.modelLabel.title = "Current Model (Click to Settings)";
     this.plugin.onSettingsChange(() => {
       if (this.modelLabel) {
@@ -1936,9 +1133,7 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
         this.inputEl.style.height = "auto";
       }
     });
-    this.sendButton = inputContainer.createEl("button", {
-      cls: "chat-send-button"
-    });
+    this.sendButton = inputContainer.createEl("button", { cls: "chat-send-button" });
     this.updateSendButton(false);
     this.sendButton.addEventListener("click", () => {
       if (this.isGenerating) {
@@ -1974,24 +1169,14 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
     this.messageContainer.empty();
     this.messageRenderer.renderTo(this.messageContainer);
     if (this.messages.length === 0) {
-      this.messageRenderer.renderAIMessage(
-        "Greetings. I am Mastermind. How can I assist you in your vault today?",
-        this.plugin.settings.profilePictureAI
-      );
+      this.messageRenderer.renderAIMessage("Greetings. I am Mastermind. How can I assist you in your vault today?", this.plugin.settings.profilePictureAI);
     } else {
       for (const msg of this.messages) {
         if (msg.role === "user") {
-          this.messageRenderer.renderUserMessage(
-            msg.parts[0].text,
-            this.plugin.settings.profilePictureUser
-          );
+          this.messageRenderer.renderUserMessage(msg.parts[0].text, this.plugin.settings.profilePictureUser);
         } else {
           this.vaultService.enhanceTextWithLinks(msg.parts[0].text).then((enhancedText) => {
-            this.messageRenderer.renderAIMessage(
-              enhancedText,
-              this.plugin.settings.profilePictureAI,
-              msg.actions
-            );
+            this.messageRenderer.renderAIMessage(enhancedText, this.plugin.settings.profilePictureAI, msg.actions);
           });
         }
       }
@@ -2005,29 +1190,14 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
     this.updateSendButton(true);
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
-    await this.messageRenderer.renderUserMessage(
-      message,
-      this.plugin.settings.profilePictureUser
-    );
-    const { update } = this.messageRenderer.startAIMessage(
-      this.plugin.settings.profilePictureAI
-    );
-    let finalResponse = {
-      text: "",
-      actions: []
-    };
+    await this.messageRenderer.renderUserMessage(message, this.plugin.settings.profilePictureUser);
+    const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
+    let finalResponse = { text: "", actions: [] };
     try {
       this.vertexService.updateSettings(this.plugin.settings);
       const context = await this.vaultService.getRelevantContext(message);
       const images = await this.vaultService.getActiveNoteImages();
-      for await (const chunk of this.vertexService.chat(
-        message,
-        context,
-        this.vaultService,
-        this.plugin.settings.history,
-        images,
-        signal
-      )) {
+      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images, signal)) {
         if (signal.aborted)
           break;
         await update(chunk, false);
@@ -2035,16 +1205,11 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
       }
       if (!signal.aborted) {
         if (finalResponse.text) {
-          const enhancedText = await this.vaultService.enhanceTextWithLinks(
-            finalResponse.text
-          );
+          const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
           finalResponse.text = enhancedText;
           await update(finalResponse, true);
         }
-        const userMsg = {
-          role: "user",
-          parts: [{ text: message }]
-        };
+        const userMsg = { role: "user", parts: [{ text: message }] };
         const aiMsg = {
           role: "model",
           parts: [{ text: finalResponse.text }],
@@ -2058,22 +1223,13 @@ var MastermindChatView = class extends import_obsidian4.ItemView {
           this.plugin.settings.history = this.plugin.settings.history.slice(-40);
         }
         await this.plugin.saveSettings();
-        await this.vaultService.writeHistory(
-          this.plugin.settings.history,
-          this.sessionId
-        );
+        await this.vaultService.writeHistory(this.plugin.settings.history, this.sessionId);
       }
     } catch (error) {
       if (error.name === "AbortError" || signal.aborted) {
-        update(
-          {
-            text: `**[Stopped by User]**
+        update({ text: `**[Stopped by User]**
 
-${(finalResponse == null ? void 0 : finalResponse.text) || ""}`,
-            actions: []
-          },
-          true
-        );
+${(finalResponse == null ? void 0 : finalResponse.text) || ""}`, actions: [] }, true);
       } else {
         console.error("Mastermind Error:", error);
         let errorMessage = error instanceof Error ? error.message : String(error);
@@ -2096,7 +1252,7 @@ var DEFAULT_SETTINGS = {
   serviceAccountJson: "",
   aiStudioKey: "",
   location: "us-central1",
-  modelId: "gemini-2.0-flash-001",
+  modelId: "gemini-2.0-flash-exp",
   history: [],
   permVaultRead: true,
   permVaultWrite: true,
@@ -2108,7 +1264,7 @@ var DEFAULT_SETTINGS = {
   profilePictureUser: "https://api.dicebear.com/7.x/notionists/svg?seed=User",
   profilePictureAI: "https://api.dicebear.com/7.x/bottts/svg?seed=Mastermind",
   customContextPrompt: "",
-  defaultModel: "gemini-2.0-flash-001",
+  defaultModel: "gemini-2.0-flash-exp",
   availableModels: [],
   maxOutputTokens: 8192,
   temperature: 0.7
@@ -2182,7 +1338,6 @@ var MastermindPlugin = class extends import_obsidian5.Plugin {
     }
   }
   async loadSettings() {
-    var _a;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     const canListModels = this.settings.availableModels.length === 0 && (this.settings.authProvider === "vertex" && !!this.settings.serviceAccountJson || this.settings.authProvider === "aistudio" && !!this.settings.aiStudioKey);
     if (canListModels) {
@@ -2200,19 +1355,16 @@ var MastermindPlugin = class extends import_obsidian5.Plugin {
             new import_obsidian5.Notice(
               `Mastermind: Auto-fetched ${models.length} ${providerLabel} models.`
             );
+          } else {
+            new import_obsidian5.Notice("Mastermind: Model list was empty. Check account permissions.");
           }
         } catch (e) {
-          console.log("Mastermind: Auto-fetch failed silently.");
+          console.error("Mastermind: Failed to auto-fetch models.", e);
+          new import_obsidian5.Notice("Mastermind: Failed to fetch models. Check credentials or network.");
         }
       }, 2e3);
     } else if (this.settings.availableModels.length === 0) {
-      const fallback = VertexService.getFallbackModelsFor(
-        (_a = this.settings.authProvider) != null ? _a : "vertex"
-      );
-      this.settings.availableModels = fallback;
-      if (!fallback.includes(this.settings.modelId) && fallback.length > 0) {
-        this.settings.modelId = fallback[0];
-      }
+      console.log("Mastermind: Model list unavailable; configure credentials to fetch available models.");
     }
   }
   async saveSettings() {
@@ -2236,17 +1388,13 @@ var MastermindSettingTab = class extends import_obsidian5.PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "Mastermind Settings" });
     containerEl.createEl("h3", { text: "Authentication" });
-    new import_obsidian5.Setting(containerEl).setName("Authentication Provider").setDesc(
-      "Choose between Vertex AI (GCP Service Account) or AI Studio (API Key)."
-    ).addDropdown(
-      (dropdown) => dropdown.addOption("vertex", "Vertex AI (GCP)").addOption("aistudio", "AI Studio (API Key)").setValue(this.plugin.settings.authProvider).onChange(async (value) => {
-        this.plugin.settings.authProvider = value;
-        await this.plugin.saveSettings();
-        this.display();
-      })
-    );
+    new import_obsidian5.Setting(containerEl).setName("Authentication Provider").setDesc("Choose between Vertex AI (GCP Service Account) or AI Studio (API Key).").addDropdown((dropdown) => dropdown.addOption("vertex", "Vertex AI (GCP)").addOption("aistudio", "AI Studio (API Key)").setValue(this.plugin.settings.authProvider).onChange(async (value) => {
+      this.plugin.settings.authProvider = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
     if (this.plugin.settings.authProvider === "vertex") {
-      if (this.plugin.settings.availableModels.length === 0 && this.plugin.settings.serviceAccountJson) {
+      if (this.plugin.settings.serviceAccountJson && this.plugin.settings.availableModels.length === 0) {
         const vertex = new VertexService(this.plugin.settings);
         try {
           const models = await vertex.listModels();
@@ -2257,32 +1405,20 @@ var MastermindSettingTab = class extends import_obsidian5.PluginSettingTab {
           console.error("Mastermind: Display auto-fetch failed", e);
         }
       }
-      new import_obsidian5.Setting(containerEl).setName("Service Account JSON").setDesc(
-        "Paste the full content of your Google Cloud Service Account JSON key file."
-      ).addTextArea(
-        (text) => text.setPlaceholder('{"type": "service_account", ...}').setValue(this.plugin.settings.serviceAccountJson).onChange(async (value) => {
-          this.plugin.settings.serviceAccountJson = value;
-          await this.plugin.saveSettings();
-        })
-      );
+      new import_obsidian5.Setting(containerEl).setName("Service Account JSON").setDesc("Paste the full content of your Google Cloud Service Account JSON key file.").addTextArea((text) => text.setPlaceholder('{"type": "service_account", ...}').setValue(this.plugin.settings.serviceAccountJson).onChange(async (value) => {
+        this.plugin.settings.serviceAccountJson = value;
+        await this.plugin.saveSettings();
+      }));
       const locations = {
-        Global: ["global"],
-        US: ["us-central1", "us-east1", "us-east4", "us-west1", "us-west4"],
-        Europe: [
-          "europe-west1",
-          "europe-west2",
-          "europe-west3",
-          "europe-west4",
-          "europe-north1"
-        ],
-        Asia: ["asia-east1", "asia-northeast1", "asia-southeast1"]
+        "Global": ["global"],
+        "US": ["us-central1", "us-east1", "us-east4", "us-west1", "us-west4"],
+        "Europe": ["europe-west1", "europe-west2", "europe-west3", "europe-west4", "europe-north1"],
+        "Asia": ["asia-east1", "asia-northeast1", "asia-southeast1"]
       };
       new import_obsidian5.Setting(containerEl).setName("Vertex AI Region").setDesc("Select the Google Cloud region for API calls.").addDropdown((dropdown) => {
         for (const region in locations) {
           const locs = locations[region];
-          locs.forEach(
-            (loc) => dropdown.addOption(loc, `${region} - ${loc}`)
-          );
+          locs.forEach((loc) => dropdown.addOption(loc, `${region} - ${loc}`));
         }
         dropdown.setValue(this.plugin.settings.location).onChange(async (value) => {
           this.plugin.settings.location = value;
@@ -2290,31 +1426,15 @@ var MastermindSettingTab = class extends import_obsidian5.PluginSettingTab {
         });
       });
     } else {
-      if (this.plugin.settings.availableModels.length === 0 && this.plugin.settings.aiStudioKey) {
-        const vertex = new VertexService(this.plugin.settings);
-        try {
-          const models = await vertex.listModels();
-          if (models.length > 0) {
-            this.plugin.settings.availableModels = models;
-          }
-        } catch (e) {
-          console.error("Mastermind: Display auto-fetch failed", e);
-        }
-      }
-      new import_obsidian5.Setting(containerEl).setName("AI Studio API Key").setDesc("Enter your Google AI Studio API key.").addText(
-        (text) => text.setPlaceholder("AIza...").setValue(this.plugin.settings.aiStudioKey).onChange(async (value) => {
-          this.plugin.settings.aiStudioKey = value;
-          await this.plugin.saveSettings();
-        })
-      );
+      new import_obsidian5.Setting(containerEl).setName("AI Studio API Key").setDesc("Enter your Google AI Studio API key.").addText((text) => text.setPlaceholder("AIza...").setValue(this.plugin.settings.aiStudioKey).onChange(async (value) => {
+        this.plugin.settings.aiStudioKey = value;
+        await this.plugin.saveSettings();
+      }));
     }
     containerEl.createEl("h3", { text: "Model Selection" });
     new import_obsidian5.Setting(containerEl).setName("Gemini Model").setDesc("Select a supported Gemini model.").addDropdown((dropdown) => {
-      const fallbackModels = VertexService.getFallbackModelsFor(
-        this.plugin.settings.authProvider
-      );
-      const options = this.plugin.settings.availableModels.length > 0 ? this.plugin.settings.availableModels : [this.plugin.settings.modelId, ...fallbackModels];
-      const uniqueOptions = [...new Set(options.filter(Boolean))];
+      const options = this.plugin.settings.availableModels.length > 0 ? this.plugin.settings.availableModels : [this.plugin.settings.modelId, "gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"];
+      const uniqueOptions = [...new Set(options)];
       uniqueOptions.forEach((m) => dropdown.addOption(m, m));
       dropdown.setValue(this.plugin.settings.modelId);
       dropdown.onChange(async (value) => {
@@ -2322,49 +1442,73 @@ var MastermindSettingTab = class extends import_obsidian5.PluginSettingTab {
         await this.plugin.saveSettings();
       });
       this.modelDropdown = dropdown;
-    }).addExtraButton(
-      (btn) => btn.setIcon("refresh-cw").setTooltip("Fetch accessible models").onClick(async () => {
-        const vertex = new VertexService(this.plugin.settings);
-        try {
-          const btnEl = btn.extraSettingsEl;
-          btnEl.addClass("is-loading");
-          new import_obsidian5.Notice("Fetching models...");
-          const models = await vertex.listModels();
-          if (models.length > 0) {
-            const dd = this.modelDropdown;
-            dd.selectEl.innerHTML = "";
-            models.forEach((m) => dd.addOption(m, m));
-            dd.setValue(models[0]);
-            this.plugin.settings.modelId = models[0];
-            this.plugin.settings.availableModels = models;
-            await this.plugin.saveSettings();
-            new import_obsidian5.Notice(`Fetched ${models.length} models.`);
-          } else {
-            new import_obsidian5.Notice("No additional models found.");
-          }
-        } catch (e) {
-          new import_obsidian5.Notice("Failed to fetch models.");
-          console.error("Fetch error:", e);
-        }
-      })
-    );
-    containerEl.createEl("h3", { text: "Generation Parameters" });
-    new import_obsidian5.Setting(containerEl).setName("Max Output Tokens").setDesc("Maximum number of tokens to generate (e.g., 8192).").addText(
-      (text) => text.setValue(String(this.plugin.settings.maxOutputTokens)).onChange(async (value) => {
-        const numeric = parseInt(value);
-        if (!isNaN(numeric)) {
-          this.plugin.settings.maxOutputTokens = numeric;
+    }).addExtraButton((btn) => btn.setIcon("refresh-cw").setTooltip("Fetch accessible models").onClick(async () => {
+      const vertex = new VertexService(this.plugin.settings);
+      try {
+        const btnEl = btn.extraSettingsEl;
+        btnEl.addClass("is-loading");
+        new import_obsidian5.Notice("Fetching models...");
+        const models = await vertex.listModels();
+        if (models.length > 0) {
+          const dd = this.modelDropdown;
+          dd.selectEl.innerHTML = "";
+          models.forEach((m) => dd.addOption(m, m));
+          dd.setValue(models[0]);
+          this.plugin.settings.modelId = models[0];
+          this.plugin.settings.availableModels = models;
           await this.plugin.saveSettings();
+          new import_obsidian5.Notice(`Fetched ${models.length} models.`);
+        } else {
+          new import_obsidian5.Notice("No additional models found.");
         }
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Temperature").setDesc("Creativity (0.0 - 2.0). Higher values = more creative.").addSlider(
-      (slider) => slider.setLimits(0, 2, 0.1).setValue(this.plugin.settings.temperature).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.temperature = value;
+      } catch (e) {
+        new import_obsidian5.Notice("Failed to fetch models.");
+        console.error("Fetch error:", e);
+      }
+    }));
+    containerEl.createEl("h3", { text: "Generation Parameters" });
+    new import_obsidian5.Setting(containerEl).setName("Max Output Tokens").setDesc("Maximum number of tokens to generate (e.g., 8192).").addText((text) => text.setValue(String(this.plugin.settings.maxOutputTokens)).onChange(async (value) => {
+      const numeric = parseInt(value);
+      if (!isNaN(numeric)) {
+        this.plugin.settings.maxOutputTokens = numeric;
         await this.plugin.saveSettings();
-      })
-    );
+      }
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Temperature").setDesc("Creativity (0.0 - 2.0). Higher values = more creative.").addSlider((slider) => slider.setLimits(0, 2, 0.1).setValue(this.plugin.settings.temperature).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.temperature = value;
+      await this.plugin.saveSettings();
+    }));
     containerEl.createEl("h3", { text: "Tool Permissions" });
+    new import_obsidian5.Setting(containerEl).setName("Vault Read Access").setDesc("Allow AI to read files, search vault, list directories.").addToggle((toggle) => toggle.setValue(this.plugin.settings.permVaultRead).onChange(async (value) => {
+      this.plugin.settings.permVaultRead = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Vault Write Access").setDesc("Allow AI to create notes, update sections, append content.").addToggle((toggle) => toggle.setValue(this.plugin.settings.permVaultWrite).onChange(async (value) => {
+      this.plugin.settings.permVaultWrite = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Vault Delete Access").setDesc("Allow AI to delete files and folders.").addToggle((toggle) => toggle.setValue(this.plugin.settings.permVaultDelete).onChange(async (value) => {
+      this.plugin.settings.permVaultDelete = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Web Access").setDesc("Allow AI to fetch URLs from the internet.").addToggle((toggle) => toggle.setValue(this.plugin.settings.permWeb).onChange(async (value) => {
+      this.plugin.settings.permWeb = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Terminal Access").setDesc("Allow AI to run shell commands on your system.").addToggle((toggle) => toggle.setValue(this.plugin.settings.permTerminal).onChange(async (value) => {
+      this.plugin.settings.permTerminal = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Safety Confirmations" });
+    new import_obsidian5.Setting(containerEl).setName("Confirm Vault Deletions").setDesc("Ask before AI deletes files in your vault.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmVaultDestructive).onChange(async (value) => {
+      this.plugin.settings.confirmVaultDestructive = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Confirm Terminal Commands").setDesc("Ask before AI runs potentially destructive shell commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmTerminalDestructive).onChange(async (value) => {
+      this.plugin.settings.confirmTerminalDestructive = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Appearance & Behavior" });
     new import_obsidian5.Setting(containerEl).setName("Vault Read Access").setDesc("Allow AI to read files, search vault, list directories.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.permVaultRead).onChange(async (value) => {
         this.plugin.settings.permVaultRead = value;
@@ -2377,55 +1521,9 @@ var MastermindSettingTab = class extends import_obsidian5.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Vault Delete Access").setDesc("Allow AI to delete files and folders.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.permVaultDelete).onChange(async (value) => {
-        this.plugin.settings.permVaultDelete = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Web Access").setDesc("Allow AI to fetch URLs from the internet.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.permWeb).onChange(async (value) => {
-        this.plugin.settings.permWeb = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Terminal Access").setDesc("Allow AI to run shell commands on your system.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.permTerminal).onChange(async (value) => {
-        this.plugin.settings.permTerminal = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    containerEl.createEl("h3", { text: "Safety Confirmations" });
-    new import_obsidian5.Setting(containerEl).setName("Confirm Vault Deletions").setDesc("Ask before AI deletes files in your vault.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.confirmVaultDestructive).onChange(async (value) => {
-        this.plugin.settings.confirmVaultDestructive = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Confirm Terminal Commands").setDesc("Ask before AI runs potentially destructive shell commands.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.confirmTerminalDestructive).onChange(async (value) => {
-        this.plugin.settings.confirmTerminalDestructive = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    containerEl.createEl("h3", { text: "Appearance & Behavior" });
-    new import_obsidian5.Setting(containerEl).setName("Profile Picture (User)").setDesc("URL for your avatar.").addText(
-      (text) => text.setPlaceholder("https://...").setValue(this.plugin.settings.profilePictureUser).onChange(async (value) => {
-        this.plugin.settings.profilePictureUser = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Profile Picture (AI)").setDesc("URL for Mastermind's avatar.").addText(
-      (text) => text.setPlaceholder("https://...").setValue(this.plugin.settings.profilePictureAI).onChange(async (value) => {
-        this.plugin.settings.profilePictureAI = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian5.Setting(containerEl).setName("Custom Context Prompt").setDesc('Additional instructions for the AI (e.g., "Be concise").').addTextArea(
-      (text) => text.setPlaceholder("You are an expert coder...").setValue(this.plugin.settings.customContextPrompt).onChange(async (value) => {
-        this.plugin.settings.customContextPrompt = value;
-        await this.plugin.saveSettings();
-      })
-    );
+    new import_obsidian5.Setting(containerEl).setName("Custom Context Prompt").setDesc('Additional instructions for the AI (e.g., "Be concise").').addTextArea((text) => text.setPlaceholder("You are an expert coder...").setValue(this.plugin.settings.customContextPrompt).onChange(async (value) => {
+      this.plugin.settings.customContextPrompt = value;
+      await this.plugin.saveSettings();
+    }));
   }
 };
