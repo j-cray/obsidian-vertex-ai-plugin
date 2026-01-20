@@ -243,6 +243,9 @@ export class MastermindChatView extends ItemView {
     // Prepare AI Message Container (Streaming)
     const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
 
+    // Show thinking animation immediately
+    await update({ text: '', actions: [], isThinking: true }, false);
+
     // Streaming Loop with Signal
     let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
 

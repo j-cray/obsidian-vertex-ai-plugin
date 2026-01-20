@@ -91,31 +91,53 @@ export class MessageRenderer {
       }
 
       // 2. Handle Thinking Block with Typewriter Effect
-      if (response.thinkingText && response.thinkingText.length > 0) {
+      if (response.isThinking) {
         thinkingContainer.style.display = 'block';
 
-        // Update target thinking text
-        fullThinkingText = response.thinkingText;
-        thinkingContent.style.display = 'block';
-        dotsContainer.style.display = 'none';
+        if (response.thinkingText && response.thinkingText.length > 0) {
+          // We have thinking text - show it with typewriter
+          thinkingContent.style.display = 'block';
+          dotsContainer.style.display = 'none';
 
-        // Start typewriter for thinking if not already running
-        if (!thinkingTypewriterInterval) {
-          thinkingTypewriterInterval = setInterval(() => {
-            if (lastThinkingLength < fullThinkingText.length) {
-              // Add 3-5 chars per frame for smooth but visible progress
-              const charsToAdd = Math.min(5, fullThinkingText.length - lastThinkingLength);
-              thinkingContent.innerText = fullThinkingText.substring(0, lastThinkingLength + charsToAdd);
-              lastThinkingLength += charsToAdd;
-              thinkingContent.scrollTop = thinkingContent.scrollHeight; // Auto-scroll
-            } else if (isFinal) {
-              // Thinking is complete
-              clearInterval(thinkingTypewriterInterval);
-              thinkingTypewriterInterval = null;
-              thinkingContent.innerText = fullThinkingText;
-              thinkingContainer.addClass('thinking-code-block');
-            }
-          }, 15); // ~67 updates/sec, creates smooth flowing effect
+          // Update target thinking text
+          fullThinkingText = response.thinkingText;
+
+          // Start typewriter for thinking if not already running
+          if (!thinkingTypewriterInterval) {
+            thinkingTypewriterInterval = setInterval(() => {
+              if (lastThinkingLength < fullThinkingText.length) {
+                // Add 3-5 chars per frame for smooth but visible progress
+                const charsToAdd = Math.min(5, fullThinkingText.length - lastThinkingLength);
+                thinkingContent.innerText = fullThinkingText.substring(0, lastThinkingLength + charsToAdd);
+                lastThinkingLength += charsToAdd;
+                thinkingContent.scrollTop = thinkingContent.scrollHeight; // Auto-scroll
+              } else if (isFinal) {
+                // Thinking is complete
+                clearInterval(thinkingTypewriterInterval);
+                thinkingTypewriterInterval = null;
+                thinkingContent.innerText = fullThinkingText;
+                thinkingContainer.addClass('thinking-code-block');
+              }
+            }, 15); // ~67 updates/sec, creates smooth flowing effect
+          }
+        } else {
+          // No thinking text yet - show animated dots
+          thinkingContent.style.display = 'none';
+          dotsContainer.style.display = 'flex';
+        }
+      } else {
+        // Not thinking anymore - hide the container if no thinking text was produced
+        if (!response.thinkingText || response.thinkingText.length === 0) {
+          thinkingContainer.style.display = 'none';
+        } else {
+          // Ensure final thinking text is displayed and styled
+          if (thinkingTypewriterInterval) {
+            clearInterval(thinkingTypewriterInterval);
+            thinkingTypewriterInterval = null;
+          }
+          thinkingContent.innerText = response.thinkingText;
+          thinkingContainer.addClass('thinking-code-block');
+          dotsContainer.style.display = 'none';
         }
       }
 
