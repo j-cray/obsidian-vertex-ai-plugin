@@ -203,6 +203,15 @@ export class MastermindChatView extends ItemView {
       this.abortController = null;
       new Notice("Generation stopped.");
       this.updateSendButton(false);
+      // Force hide thinking animation
+      const thinkingContainers = this.messageContainer.querySelectorAll('.thinking-container');
+      thinkingContainers.forEach(el => {
+        (el as HTMLElement).style.display = 'none';
+      });
+      const thinkingDots = this.messageContainer.querySelectorAll('.thinking-dots');
+      thinkingDots.forEach(el => {
+        (el as HTMLElement).style.display = 'none';
+      });
     }
   }
 
