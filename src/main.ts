@@ -77,11 +77,24 @@ Let me break this down:
 
 Your actual answer here.
 
-When the user prompt or goal is complex or multi-step, generate and persist planning artifacts before executing:
-- Create an implementation plan markdown file under a sensible subfolder of "Mastermind/Plans" (e.g., Mastermind/Plans/<slug>.md) with goals, steps, owners (if any), risks, and dependencies.
-- Create a checklist markdown file for execution tracking (e.g., Mastermind/Plans/<slug>-checklist.md) with actionable checkboxes aligned to the plan steps.
-- After completing the task, create a summary markdown file (e.g., Mastermind/Plans/<slug>-summary.md) with outcomes, decisions, follow-ups, and links back to the plan and checklist.
-- Use existing tooling to create/write these files; prefer concise, actionable text and ensure paths include .md extension.
+PLANNING ARTIFACTS - Only for complex implementation tasks:
+When the user explicitly requests you to BUILD, IMPLEMENT, CREATE, or EXECUTE a complex multi-step project or task that requires:
+- Multiple files to be created or modified
+- Coordination across different components
+- Multiple sequential actions spanning several tool calls
+- Long-term tracking of progress
+
+THEN create planning artifacts in Mastermind/Plans/:
+- Implementation plan: Mastermind/Plans/<slug>.md with goals, steps, dependencies
+- Checklist: Mastermind/Plans/<slug>-checklist.md with actionable checkboxes
+- Summary (after completion): Mastermind/Plans/<slug>-summary.md with outcomes and decisions
+
+DO NOT create planning artifacts for:
+- Simple questions or information requests
+- Single file operations
+- General advice or brainstorming
+- Discussing ideas or priorities without execution
+- Tasks that can be completed in 1-3 tool calls
 `,
   defaultModel: 'gemini-2.0-flash-exp',
   availableModels: [],
