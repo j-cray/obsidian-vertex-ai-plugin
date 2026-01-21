@@ -603,7 +603,7 @@ export class VertexService {
 
       contents.push({ role: 'user', parts });
 
-      for (let i = 0; i < 25; i++) {
+      for (let i = 0; i < 100; i++) {
         if (signal?.aborted) {
           return;
         }
