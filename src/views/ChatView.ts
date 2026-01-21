@@ -298,8 +298,8 @@ export class MastermindChatView extends ItemView {
         this.plugin.settings.history.push(userMsg);
         this.plugin.settings.history.push(aiMsg);
 
-        if (this.plugin.settings.history.length > 40) {
-          this.plugin.settings.history = this.plugin.settings.history.slice(-40);
+        if (this.plugin.settings.history.length > 100) {
+          this.plugin.settings.history = this.plugin.settings.history.slice(-100);
         }
 
         await this.plugin.saveSettings();

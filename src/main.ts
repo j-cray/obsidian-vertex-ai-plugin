@@ -36,6 +36,7 @@ interface MastermindSettings {
   // Generation Params
   maxOutputTokens: number;
   temperature: number;
+  modelTemperature: number;
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
@@ -76,6 +77,12 @@ Let me break this down:
 \`\`\`
 
 Your actual answer here.
+
+CONVERSATION CONTINUITY:
+- Always reference prior messages in the conversation to maintain context
+- If the user refers to something said earlier, acknowledge it explicitly
+- Build on previous context; don't treat each query as isolated
+- Remember key decisions, files, and plans from earlier in the conversation
 
 TOOL USE BEST PRACTICES:
 - Search or list before reading files to find relevant content efficiently
@@ -118,7 +125,8 @@ DO NOT create planning artifacts for:
   defaultModel: 'gemini-2.0-flash-exp',
   availableModels: [],
   maxOutputTokens: 8192,
-  temperature: 0.7
+  temperature: 0.7,
+  modelTemperature: 0.5,
 }
 
 const PRECACHED_MODELS: string[] = [
@@ -628,6 +636,42 @@ class MastermindSettingTab extends PluginSettingTab {
       );
 
     // Prompt Library Management
+    new Setting(containerEl)
+      .setName('Temperature')
+      .setDesc('Model creativity (0.0 = focused, 2.0 = creative). Lower values improve conversation consistency. Default for Gemini 3 Flash: 0.5')
+      .addSlider(slider => slider
+        .setLimits(0.0, 2.0, 0.1)
+        .setValue(this.plugin.settings.modelTemperature ?? 0.5)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.modelTemperature = value;
+          await this.plugin.saveSettings();
+        }));
+
+    // ===== GENERATION PARAMETERS =====
+    containerEl.createEl('h3', { text: 'Generation Parameters' });
+
+    new Setting(containerEl)
+      .setName('Temperature')
+      .setDesc('Model creativity (0.0 = focused, 2.0 = creative). Lower values improve conversation consistency. Recommended: 0.5')
+      .addSlider(slider => slider
+        .setLimits(0.0, 2.0, 0.1)
+        .setValue(this.plugin.settings.modelTemperature ?? 0.5)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.modelTemperature = value;
+          await this.plugin.saveSettings();
+        }))
+      .addButton(btn => btn
+        .setButtonText('Reset to Default')
+        .setWarning()
+        .onClick(async () => {
+          this.plugin.settings.modelTemperature = 0.5;
+          await this.plugin.saveSettings();
+          new Notice('Temperature reset to 0.5.');
+          this.display();
+        }));
+
     containerEl.createEl('h3', { text: 'Custom Context Prompt' });
 
     new Setting(containerEl)
