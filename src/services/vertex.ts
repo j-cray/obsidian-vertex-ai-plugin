@@ -333,8 +333,8 @@ export class VertexService {
       try {
         const cached = window.localStorage.getItem(cacheKey);
         if (cached) {
-        const parsed = JSON.parse(cached) as { ts: number; models: string[] };
-        if (parsed?.models && Array.isArray(parsed.models) && parsed.ts && Date.now() - parsed.ts < cacheTtlMs) {
+          const parsed = JSON.parse(cached) as { ts: number; models: string[] };
+          if (parsed?.models && Array.isArray(parsed.models) && parsed.ts && Date.now() - parsed.ts < cacheTtlMs) {
             console.log('Mastermind DEBUG: Using cached docs models:', parsed.models.length, 'age(ms):', Date.now() - parsed.ts);
             return parsed.models;
           }
@@ -354,7 +354,7 @@ export class VertexService {
     try {
       console.log('Mastermind DEBUG: Fetching models page:', indexUrl);
       const response = await requestUrl({ url: indexUrl, method: 'GET' });
-      
+
       if (response.status !== 200) {
         console.warn('Mastermind: Models page fetch non-200 status', response.status);
         window.clearTimeout(stillRunningTimer);
@@ -368,7 +368,7 @@ export class VertexService {
       const linkPattern = /href=["']([^"']*\/(?:gemini|imagen|veo|gemma)\/([^"'/#]+))["']/gi;
       let linkMatch: RegExpExecArray | null;
       let linkCount = 0;
-      
+
       while ((linkMatch = linkPattern.exec(body)) !== null) {
         linkCount++;
         const path = linkMatch[2]?.trim();
@@ -401,7 +401,7 @@ export class VertexService {
       const anchorPattern = /<a[^>]*href=["'][^"']*\/(?:gemini|imagen|veo|gemma)[^"']*["'][^>]*>([^<]+)<\/a>/gi;
       let anchorMatch: RegExpExecArray | null;
       let anchorCount = 0;
-      
+
       while ((anchorMatch = anchorPattern.exec(body)) !== null) {
         anchorCount++;
         const text = anchorMatch[1]?.replace(/<[^>]+>/g, '').trim();
@@ -411,7 +411,7 @@ export class VertexService {
             .replace(/\s+/g, '-')
             .replace(/[^\w.-]/g, '')
             .replace(/^-+|-+$/g, '');
-          
+
           if (normalized.length >= 3 && /[a-z]/.test(normalized)) {
             ids.add(normalized);
           }
@@ -424,7 +424,7 @@ export class VertexService {
       const codePattern = /<code[^>]*>([a-z][a-z0-9._-]{4,79})<\/code>/gi;
       let codeMatch: RegExpExecArray | null;
       let codeCount = 0;
-      
+
       while ((codeMatch = codePattern.exec(body)) !== null) {
         codeCount++;
         const candidate = codeMatch[1]?.trim().toLowerCase();
@@ -649,138 +649,30 @@ export class VertexService {
           throw new Error('Received empty content from Vertex AI.');
         }
 
-        const part = candidate.content.parts[0];
+        // Process all parts of the response
+        const parts = candidate.content.parts;
+        const textParts: string[] = [];
+        const functionCalls: any[] = [];
 
-        if ('functionCall' in part && part.functionCall) {
-          const funcCall = part.functionCall;
-          const { name, args } = funcCall;
-          
-          // --- Loop Detection Start ---
-          const currentCallSignature = JSON.stringify({ name, args });
-          recentToolCalls.push({ name, args: JSON.stringify(args) });
-          
-          // Keep only the last 3 calls
-          if (recentToolCalls.length > 5) {
-            recentToolCalls.shift();
+        for (const part of parts) {
+          if ('text' in part && part.text) {
+            textParts.push(part.text);
           }
-
-          // Check if the last 3 calls are identical
-          // We need at least 3 calls to detect a "loop" of 3 repetitions
-          let isLooping = false;
-          if (recentToolCalls.length >= 3) {
-             const last = recentToolCalls[recentToolCalls.length - 1];
-             const secondLast = recentToolCalls[recentToolCalls.length - 2];
-             const thirdLast = recentToolCalls[recentToolCalls.length - 3];
-             
-             if (last.name === secondLast.name && last.name === thirdLast.name &&
-                 last.args === secondLast.args && last.args === thirdLast.args) {
-                 isLooping = true;
-             }
+          if ('functionCall' in part && part.functionCall) {
+            functionCalls.push(part.functionCall);
           }
+        }
 
-          if (isLooping) {
-             console.warn('Mastermind: Loop detected. Terminating tool use.');
-             yield {
-                text: '\n\n**Loop Detected:** I seem to be stuck repeating the same action. I will stop here to avoid an infinite loop.',
-                actions: [],
-                isThinking: false
-             };
-             return;
-          }
-          // --- Loop Detection End ---
-
-          let result: any;
-          let status: 'success' | 'error' | 'pending' = 'pending';
-
-          // Yield immediately to show the tool is being called
-          yield {
-            text: '',
-            actions: [{
-              tool: name,
-              input: args,
-              status: 'pending'
-            }],
-            isThinking: true
-          };
-
-          try {
-            if (name === 'list_files') {
-              result = await vaultService.listMarkdownFiles();
-            } else if (name === 'read_file') {
-              result = await vaultService.getFileContent(args.path);
-            } else if (name === 'search_content') {
-              result = await vaultService.searchVault(args.query);
-            } else if (name === 'create_note') {
-              await vaultService.createNote(args.path, args.content);
-              result = { status: 'success', message: `Note created at ${args.path}` };
-            } else if (name === 'create_folder') {
-              await vaultService.createFolder(args.path);
-              result = { status: 'success', message: `Folder created at ${args.path}` };
-            } else if (name === 'delete_file') {
-              await vaultService.deleteFile(args.path);
-              result = { status: 'success', message: `File deleted at ${args.path}` };
-            } else if (name === 'list_directory') {
-              result = await vaultService.listDirectory(args.path);
-            } else if (name === 'fetch_url') {
-              if (!this.permWeb) {
-                throw new Error('Web access is disabled in settings. Enable "Web Access" to allow fetch_url.');
-              }
-              result = await this.fetchUrl(args.url);
-            } else if (name === 'run_shell_command') {
-              if (!this.permTerminal) {
-                throw new Error('Terminal access is disabled in settings. Enable "Terminal Access" to allow commands.');
-              }
-              if (this.confirmTerminalDestructive) {
-                result = { status: 'error', message: 'Terminal commands require disabling "Confirm Terminal Commands" in settings.' };
-              } else {
-                result = await this.runShellCommand(String(args.command || ''));
-              }
-            }
-            status = result?.status === 'error' ? 'error' : 'success';
-          } catch (err: any) {
-            result = { status: 'error', message: err.message };
-            status = 'error';
-          }
-
-          // Yield again with result
-          yield {
-            text: '',
-            actions: [{
-              tool: name,
-              input: args,
-              output: result,
-              status: status
-            }],
-            isThinking: true
-          };
-
-          contents.push(candidate.content);
-
-          contents.push({
-            role: 'function',
-            parts: [{
-              functionResponse: {
-                name,
-                response: { name, content: result }
-              }
-            }]
-          });
-        } else if ('text' in part) {
-          // Extract thinking blocks and main text
-          const fullText = part.text || '';
+        // 1. Handle Text Parts (Thinking or Response)
+        if (textParts.length > 0) {
+          const fullText = textParts.join('\n');
           console.log('DEBUG: Full response text:', fullText.substring(0, 200));
-          
+
           const thinkingMatch = fullText.match(/```thinking\n([\s\S]*?)\n```/);
-          console.log('DEBUG: Thinking match found:', !!thinkingMatch);
-          
           if (thinkingMatch) {
             const thinkingText = thinkingMatch[1].trim();
             const mainText = fullText.replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim();
-            
-            console.log('DEBUG: Thinking text:', thinkingText.substring(0, 100));
-            console.log('DEBUG: Main text:', mainText.substring(0, 100));
-            
-            // Yield thinking block first with streaming indicator
+
             yield {
               text: mainText,
               actions: [],
@@ -788,12 +680,133 @@ export class VertexService {
               thinkingText: thinkingText
             };
           } else {
-            console.log('DEBUG: No thinking block found, yielding full text');
+            // If there are function calls, we might want to show this text as "thought" or just yield it
+            // Usually if there are tools, the text is a preamble.
             yield {
               text: fullText,
               actions: []
             };
           }
+        }
+
+        // 2. Handle Function Calls (Parallel)
+        if (functionCalls.length > 0) {
+          const functionResponses: any[] = [];
+          const toolActions: ToolAction[] = [];
+
+          // Yield pending state for all calls
+          for (const call of functionCalls) {
+            toolActions.push({
+              tool: call.name,
+              input: call.args,
+              status: 'pending'
+            });
+          }
+          yield {
+            text: textParts.join('\n').replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim(), // Show text alongside tool status
+            actions: toolActions,
+            isThinking: true
+          };
+
+          // Execute calls
+          for (let idx = 0; idx < functionCalls.length; idx++) {
+            const funcCall = functionCalls[idx];
+            const { name, args } = funcCall;
+
+            // --- Loop Detection Start ---
+            const currentCallSignature = JSON.stringify({ name, args });
+            recentToolCalls.push({ name, args: JSON.stringify(args) });
+            if (recentToolCalls.length > 5) recentToolCalls.shift();
+
+            let isLooping = false;
+            if (recentToolCalls.length >= 3) {
+              const last = recentToolCalls[recentToolCalls.length - 1];
+              const secondLast = recentToolCalls[recentToolCalls.length - 2];
+              const thirdLast = recentToolCalls[recentToolCalls.length - 3];
+              if (last.name === secondLast.name && last.name === thirdLast.name &&
+                last.args === secondLast.args && last.args === thirdLast.args) {
+                isLooping = true;
+              }
+            }
+
+            if (isLooping) {
+              console.warn('Mastermind: Loop detected. Terminating tool use.');
+              yield {
+                text: '\n\n**Loop Detected:** I seem to be stuck repeating the same action. I will stop here to avoid an infinite loop.',
+                actions: [],
+                isThinking: false
+              };
+              return;
+            }
+            // --- Loop Detection End ---
+
+            let result: any;
+            let status: 'success' | 'error' = 'success';
+
+            try {
+              if (name === 'list_files') {
+                result = await vaultService.listMarkdownFiles();
+              } else if (name === 'read_file') {
+                result = await vaultService.getFileContent(args.path);
+              } else if (name === 'search_content') {
+                result = await vaultService.searchVault(args.query);
+              } else if (name === 'create_note') {
+                await vaultService.createNote(args.path, args.content);
+                result = { status: 'success', message: `Note created at ${args.path}` };
+              } else if (name === 'create_folder') {
+                await vaultService.createFolder(args.path);
+                result = { status: 'success', message: `Folder created at ${args.path}` };
+              } else if (name === 'delete_file') {
+                await vaultService.deleteFile(args.path);
+                result = { status: 'success', message: `File deleted at ${args.path}` };
+              } else if (name === 'list_directory') {
+                result = await vaultService.listDirectory(args.path);
+              } else if (name === 'fetch_url') {
+                if (!this.permWeb) {
+                  throw new Error('Web access is disabled in settings. Enable "Web Access" to allow fetch_url.');
+                }
+                result = await this.fetchUrl(args.url);
+              } else if (name === 'run_shell_command') {
+                if (!this.permTerminal) {
+                  throw new Error('Terminal access is disabled in settings. Enable "Terminal Access" to allow commands.');
+                }
+                if (this.confirmTerminalDestructive) {
+                  result = { status: 'error', message: 'Terminal commands require disabling "Confirm Terminal Commands" in settings.' };
+                } else {
+                  result = await this.runShellCommand(String(args.command || ''));
+                }
+              }
+            } catch (err: any) {
+              result = { status: 'error', message: err.message };
+              status = 'error';
+            }
+
+            toolActions[idx].output = result;
+            toolActions[idx].status = status;
+            yield {
+              text: textParts.join('\n').replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim(),
+              actions: [...toolActions], // Copy array to trigger update
+              isThinking: true
+            };
+
+            // Vertex AI requires function responses to be in the SAME ORDER as the calls
+            functionResponses.push({
+              functionResponse: {
+                name,
+                response: { name, content: result }
+              }
+            });
+          }
+
+          // Push full turn to history
+          contents.push(candidate.content); // User request + Model calls
+          contents.push({
+            role: 'function',
+            parts: functionResponses
+          });
+
+        } else if (textParts.length > 0 && functionCalls.length === 0) {
+          // Pure text response, we are done
           return;
         }
       }
