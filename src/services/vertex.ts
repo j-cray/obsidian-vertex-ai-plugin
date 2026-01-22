@@ -605,6 +605,9 @@ export class VertexService {
 
       contents.push({ role: 'user', parts });
 
+      // Track recent tool calls for loop detection
+      const recentToolCalls: { name: string; args: string }[] = [];
+
       for (let i = 0; i < 100; i++) {
         if (signal?.aborted) {
           return;
@@ -651,6 +654,41 @@ export class VertexService {
         if ('functionCall' in part && part.functionCall) {
           const funcCall = part.functionCall;
           const { name, args } = funcCall;
+          
+          // --- Loop Detection Start ---
+          const currentCallSignature = JSON.stringify({ name, args });
+          recentToolCalls.push({ name, args: JSON.stringify(args) });
+          
+          // Keep only the last 3 calls
+          if (recentToolCalls.length > 5) {
+            recentToolCalls.shift();
+          }
+
+          // Check if the last 3 calls are identical
+          // We need at least 3 calls to detect a "loop" of 3 repetitions
+          let isLooping = false;
+          if (recentToolCalls.length >= 3) {
+             const last = recentToolCalls[recentToolCalls.length - 1];
+             const secondLast = recentToolCalls[recentToolCalls.length - 2];
+             const thirdLast = recentToolCalls[recentToolCalls.length - 3];
+             
+             if (last.name === secondLast.name && last.name === thirdLast.name &&
+                 last.args === secondLast.args && last.args === thirdLast.args) {
+                 isLooping = true;
+             }
+          }
+
+          if (isLooping) {
+             console.warn('Mastermind: Loop detected. Terminating tool use.');
+             yield {
+                text: '\n\n**Loop Detected:** I seem to be stuck repeating the same action. I will stop here to avoid an infinite loop.',
+                actions: [],
+                isThinking: false
+             };
+             return;
+          }
+          // --- Loop Detection End ---
+
           let result: any;
           let status: 'success' | 'error' | 'pending' = 'pending';
 
