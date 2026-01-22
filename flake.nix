@@ -21,6 +21,9 @@
         ];
 
         shellHook = ''
+            # Set gcloud project for this repo
+            gcloud config set project obsidian-vertex-ai-plugin 2>/dev/null || true
+            
           echo "Entering Obsidian Vertex AI Mastermind development environment..."
           npm install
         '';

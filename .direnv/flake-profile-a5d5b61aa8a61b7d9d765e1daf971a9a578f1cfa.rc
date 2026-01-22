@@ -39,7 +39,7 @@ NIX_CC='/nix/store/ykbj4vy7p4gzhfm59say7q4pmddv8ja7-clang-wrapper-16.0.6'
 export NIX_CC
 NIX_CC_WRAPPER_TARGET_HOST_aarch64_apple_darwin='1'
 export NIX_CC_WRAPPER_TARGET_HOST_aarch64_apple_darwin
-NIX_CFLAGS_COMPILE='-F/nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks  -frandom-seed=rxhrrkgcw6 -isysroot /nix/store/sdxhp1bk4l6zcl8dgsviyv5x3a06swbi-sdkroot-11.0/MacOSX11.0.sdk -isystem /nix/store/hyszxgyjyfr7gh7wlggf373bdvcwkhv0-libcxx-16.0.6-dev/include -isystem /nix/store/3jvsg0q3g3yr4r7j45k9m6nzxs5wisvf-compiler-rt-libc-16.0.6-dev/include -isystem /nix/store/s7pz93lnrc1fm49fxz8d8qcdphwh661f-nodejs-22.10.0/include -iframework /nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks -isystem /nix/store/z17njjix0mwdk1pkmj2zmvdksx7d4kp7-libobjc-11.0.0/include -isystem /nix/store/hyszxgyjyfr7gh7wlggf373bdvcwkhv0-libcxx-16.0.6-dev/include -isystem /nix/store/3jvsg0q3g3yr4r7j45k9m6nzxs5wisvf-compiler-rt-libc-16.0.6-dev/include -isystem /nix/store/s7pz93lnrc1fm49fxz8d8qcdphwh661f-nodejs-22.10.0/include -iframework /nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks -isystem /nix/store/z17njjix0mwdk1pkmj2zmvdksx7d4kp7-libobjc-11.0.0/include'
+NIX_CFLAGS_COMPILE='-F/nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks  -frandom-seed=yfnrdy4989 -isysroot /nix/store/sdxhp1bk4l6zcl8dgsviyv5x3a06swbi-sdkroot-11.0/MacOSX11.0.sdk -isystem /nix/store/hyszxgyjyfr7gh7wlggf373bdvcwkhv0-libcxx-16.0.6-dev/include -isystem /nix/store/3jvsg0q3g3yr4r7j45k9m6nzxs5wisvf-compiler-rt-libc-16.0.6-dev/include -isystem /nix/store/s7pz93lnrc1fm49fxz8d8qcdphwh661f-nodejs-22.10.0/include -iframework /nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks -isystem /nix/store/z17njjix0mwdk1pkmj2zmvdksx7d4kp7-libobjc-11.0.0/include -isystem /nix/store/hyszxgyjyfr7gh7wlggf373bdvcwkhv0-libcxx-16.0.6-dev/include -isystem /nix/store/3jvsg0q3g3yr4r7j45k9m6nzxs5wisvf-compiler-rt-libc-16.0.6-dev/include -isystem /nix/store/s7pz93lnrc1fm49fxz8d8qcdphwh661f-nodejs-22.10.0/include -iframework /nix/store/08gkz81fvzhwyla4ya5rs6wj74kggc30-apple-framework-CoreFoundation-11.0.0/Library/Frameworks -isystem /nix/store/z17njjix0mwdk1pkmj2zmvdksx7d4kp7-libobjc-11.0.0/include'
 export NIX_CFLAGS_COMPILE
 NIX_DONT_SET_RPATH='1'
 export NIX_DONT_SET_RPATH
@@ -196,7 +196,10 @@ export propagatedNativeBuildInputs
 declare -a propagatedTargetDepFiles=('propagated-target-target-deps' )
 shell='/nix/store/c3fffmvqhr664gaxvqwi9raxlwjgq0q3-bash-5.2p32/bin/bash'
 export shell
-shellHook='echo "Entering Obsidian Vertex AI Mastermind development environment..."
+shellHook='  # Set gcloud project for this repo
+  gcloud config set project obsidian-vertex-ai-plugin 2>/dev/null || true
+  
+echo "Entering Obsidian Vertex AI Mastermind development environment..."
 npm install
 '
 export shellHook
