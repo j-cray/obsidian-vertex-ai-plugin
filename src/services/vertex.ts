@@ -628,7 +628,9 @@ export class VertexService {
           requestConfig.systemInstruction = systemInstructionText;
         }
 
-        const response = await generativeModel.generateContent(requestConfig);
+        const response = await this.retryWithBackoff(async () => {
+          return await generativeModel.generateContent(requestConfig);
+        });
 
         const result = response.response;
 
@@ -886,5 +888,30 @@ export class VertexService {
       exitCode: code,
       truncated,
     };
+  }
+
+  private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 5, initialDelay: number = 1000): Promise<T> {
+    let retries = 0;
+    while (true) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        if (retries >= maxRetries) {
+          throw error;
+        }
+
+        const is429 = error.message?.includes('429') || error.status === 429 || error.code === 429 || error.message?.includes('Resource exhausted');
+        if (!is429) {
+          throw error;
+        }
+
+        retries++;
+        // Exponential backoff with jitter: delay * 2^attempt + random(0-1000ms)
+        const delay = initialDelay * Math.pow(2, retries - 1) + Math.random() * 1000;
+        console.warn(`Mastermind: 429 Resource Exhausted. Retrying in ${Math.round(delay)}ms (Attempt ${retries}/${maxRetries})...`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 }
