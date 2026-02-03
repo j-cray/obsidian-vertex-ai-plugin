@@ -261,11 +261,6 @@ export class MastermindChatView extends ItemView {
     try {
       this.vertexService.updateSettings(this.plugin.settings);
 
-      // Debug traces to verify chat is available and iterable
-      console.log('DEBUG: vertexService type:', typeof this.vertexService);
-      console.log('DEBUG: vertexService.chat type:', typeof this.vertexService.chat);
-      console.log('DEBUG: vertexService.chat has asyncIterator:', typeof this.vertexService.chat?.()[Symbol.asyncIterator] === 'function');
-
       const context = await this.vaultService.getRelevantContext(message);
       const images = await this.vaultService.getActiveNoteImages();
 
@@ -304,8 +299,8 @@ export class MastermindChatView extends ItemView {
         this.plugin.settings.history.push(userMsg);
         this.plugin.settings.history.push(aiMsg);
 
-        if (this.plugin.settings.history.length > 100) {
-          this.plugin.settings.history = this.plugin.settings.history.slice(-100);
+        if (this.plugin.settings.history.length > 50) {
+          this.plugin.settings.history = this.plugin.settings.history.slice(-50);
         }
 
         await this.plugin.saveSettings();

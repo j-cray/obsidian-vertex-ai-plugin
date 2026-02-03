@@ -669,6 +669,18 @@ export class VertexService {
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
       let contents: any[] = [];
+
+      // Inject History (stripped of local metadata)
+      if (history && history.length > 0) {
+        history.forEach(h => {
+          if (h.role === 'user' || h.role === 'model') {
+            const validParts = h.parts.filter((p: any) => p.text).map((p: any) => ({ text: p.text }));
+            if (validParts.length > 0) {
+              contents.push({ role: h.role, parts: validParts });
+            }
+          }
+        });
+      }
       const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
 
       for (const img of images) {
