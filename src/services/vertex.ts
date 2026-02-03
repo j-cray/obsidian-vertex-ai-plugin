@@ -588,7 +588,7 @@ export class VertexService {
         });
       }
 
-      const tools = [{ function_declarations: functionDeclarations }];
+      const tools = [{ functionDeclarations: functionDeclarations }];
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
       let contents: any[] = [];
