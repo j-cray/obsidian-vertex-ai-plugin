@@ -674,7 +674,14 @@ export class VertexService {
       if (history && history.length > 0) {
         history.forEach(h => {
           if (h.role === 'user' || h.role === 'model') {
-            const validParts = h.parts.filter((p: any) => p.text).map((p: any) => ({ text: p.text }));
+            let validParts = h.parts.filter((p: any) => p.text).map((p: any) => ({ text: p.text }));
+
+            // Fix for Memory Loss: Synthesize text for tool-only turns
+            if (h.role === 'model' && validParts.length === 0 && h.actions && h.actions.length > 0) {
+              const toolNames = h.actions.map((a: any) => a.tool).join(', ');
+              validParts = [{ text: `[Executed tools: ${toolNames}]` }];
+            }
+
             if (validParts.length > 0) {
               contents.push({ role: h.role, parts: validParts });
             }
