@@ -623,7 +623,29 @@ class MastermindSettingTab extends PluginSettingTab {
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.confirmTerminalDestructive)
         .onChange(async (value) => {
-          this.plugin.settings.confirmTerminalDestructive = value;
+          await this.plugin.saveSettings();
+        }));
+
+    // ===== APPEARANCE =====
+    containerEl.createEl('h3', { text: 'Appearance' });
+
+    new Setting(containerEl)
+      .setName('User Profile Picture')
+      .setDesc('URL for the user avatar in chat.')
+      .addText(text => text
+        .setValue(this.plugin.settings.profilePictureUser)
+        .onChange(async (value) => {
+          this.plugin.settings.profilePictureUser = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('AI Profile Picture')
+      .setDesc('URL for the AI assistant avatar in chat.')
+      .addText(text => text
+        .setValue(this.plugin.settings.profilePictureAI)
+        .onChange(async (value) => {
+          this.plugin.settings.profilePictureAI = value;
           await this.plugin.saveSettings();
         }));
 
