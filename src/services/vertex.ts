@@ -890,7 +890,7 @@ export class VertexService {
     };
   }
 
-  private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 5, initialDelay: number = 1000): Promise<T> {
+  private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 10, initialDelay: number = 2000): Promise<T> {
     let retries = 0;
     while (true) {
       try {
@@ -900,7 +900,13 @@ export class VertexService {
           throw error;
         }
 
-        const is429 = error.message?.includes('429') || error.status === 429 || error.code === 429 || error.message?.includes('Resource exhausted');
+        const errStr = error.message || String(error);
+        const is429 = errStr.includes('429') || 
+                      errStr.includes('RESOURCE_EXHAUSTED') || 
+                      errStr.includes('Resource exhausted') ||
+                      error.status === 429 || 
+                      error.code === 429;
+
         if (!is429) {
           throw error;
         }
