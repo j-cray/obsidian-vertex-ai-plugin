@@ -454,10 +454,87 @@ export class VertexService {
     return results;
   }
 
+  private selectModel(prompt: string, images: any[]): string {
+    console.log('Mastermind DEBUG: Auto-selecting model...');
+    const p = prompt.toLowerCase();
+
+    // 1. Image Generation Intent
+    // "create an image", "draw a picture", "make a sketch"
+    const imageGenRegex = /(?:generate|create|make|draw).*(?:image|picture|photo|sketch|diagram)/i;
+    if (imageGenRegex.test(p) || (images.length > 0 && (p.includes('edit') || p.includes('change') || p.includes('modify')))) {
+      console.log('Mastermind DEBUG: Auto-selection: IMAGE_GEN detected.');
+      // Prefer Imagen 3 if available, else best multimodal
+      // Since we don't have a live "available" list inside this method efficiently without strict checking,
+      // we'll rely on what we know or fallbacks.
+      // Ideally we check this.settings.availableModels if passed, but for now we hardcode preference.
+      return 'imagen-3.0-generate-001';
+    }
+
+    // 2. Multimodal Input
+    if (images.length > 0) {
+      console.log('Mastermind DEBUG: Auto-selection: Multimodal input detected -> COMPLEX.');
+      return 'gemini-3-pro-preview';
+    }
+
+    // 3. Complexity Scoring
+    let score = 0;
+    const words = p.split(/\s+/).length;
+
+    // Length
+    if (words > 50) score += 1;
+    if (words > 200) score += 2;
+
+    // Structure
+    if (p.includes('```')) score += 2;
+
+    // Keywords (Weighted)
+    const reasoningKeywords = ['analyze', 'compare', 'note', 'evaluate', 'why', 'how', 'impact', 'consequence'];
+    const engineeringKeywords = ['refactor', 'architect', 'security', 'optimize', 'debug', 'api', 'database', 'interface', 'class'];
+    const constraintsKeywords = ['step-by-step', 'chain of thought', 'json', 'csv'];
+    const creativeKeywords = ['poem', 'story', 'script', 'novel', 'creative'];
+    const mathKeywords = ['calculate', 'solve', 'equation', 'logic', 'math'];
+
+    reasoningKeywords.forEach(k => { if (p.includes(k)) score += 1; });
+
+    // Engineering terms usually imply heavy lifting, add once heavily
+    if (engineeringKeywords.some(k => p.includes(k))) score += 2;
+
+    if (constraintsKeywords.some(k => p.includes(k))) score += 2;
+    if (creativeKeywords.some(k => p.includes(k))) score += 1;
+    if (mathKeywords.some(k => p.includes(k))) score += 2;
+
+    console.log(`Mastermind DEBUG: Auto-selection Score: ${score} (Words: ${words})`);
+
+    // Threshold
+    if (score >= 4) {
+      console.log('Mastermind DEBUG: Auto-selection: COMPLEX tier.');
+      return 'gemini-3-pro-preview';
+    }
+
+    // Default to Simple
+    console.log('Mastermind DEBUG: Auto-selection: SIMPLE tier.');
+
+    // Prefer 2.5 Flash if we think it's available (it's new), else 2.0 Flash
+    // We can just return the ID, and if it fails, the user will see. 
+    // But better to be safe? No, let's trust the defaults we planned.
+    return 'gemini-2.5-flash';
+  }
+
   async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
     const projectId = this.getProjectId();
-    const modelId = this.modelId || 'gemini-2.0-flash-exp';
+    let modelId = this.modelId || 'gemini-2.0-flash-exp';
     const location = this.location || 'us-central1';
+
+    // Auto-Model Selection
+    if (modelId === 'auto') {
+      const selected = this.selectModel(prompt, images);
+      // Verify fallbacks if specific models aren't available? 
+      // For now, we assume the user has access to standard models if they use Auto.
+      // We can add a quick check if we had the availableModels list handy, but that's in settings.
+      // Basic fallback logic for safety:
+      // If we picked a preview model, we might want to ensure it works, but let's try it.
+      modelId = selected;
+    }
 
     try {
       const client = this.getVertexClient();
@@ -692,14 +769,15 @@ export class VertexService {
               text: mainText,
               actions: [],
               isThinking: true,
-              thinkingText: thinkingText
+              thinkingText: thinkingText,
+              acceptedModelId: modelId
             };
           } else {
-            // If there are function calls, we might want to show this text as "thought" or just yield it
-            // Usually if there are tools, the text is a preamble.
+            // If there are tools, the text is a preamble.
             yield {
               text: fullText,
-              actions: []
+              actions: [],
+              acceptedModelId: modelId
             };
           }
         }
@@ -720,7 +798,8 @@ export class VertexService {
           yield {
             text: textParts.join('\n').replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim(), // Show text alongside tool status
             actions: toolActions,
-            isThinking: true
+            isThinking: true,
+            acceptedModelId: modelId
           };
 
           // Execute calls

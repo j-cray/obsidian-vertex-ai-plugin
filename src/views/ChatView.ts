@@ -272,6 +272,12 @@ export class MastermindChatView extends ItemView {
       // Pass signal to chat
       for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images, signal)) {
         if (signal.aborted) break;
+
+        // Dynamic Header Update
+        if (chunk.acceptedModelId && this.plugin.settings.modelId === 'auto') {
+          this.modelLabel.innerText = `${chunk.acceptedModelId} (Auto)`;
+        }
+
         await update(chunk, false);
         finalResponse = chunk;
       }

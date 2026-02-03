@@ -11,4 +11,5 @@ export interface ChatResponse {
   isThinking?: boolean; // True if currently generating thought process
   thinkingText?: string; // The content of the thinking block
   usage?: { input: number; output: number };
+  acceptedModelId?: string; // The actual model used (e.g. for Auto mode)
 }
