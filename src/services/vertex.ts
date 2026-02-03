@@ -635,20 +635,33 @@ export class VertexService {
         const result = response.response;
 
         if (!result.candidates || result.candidates.length === 0) {
-          if (result.promptFeedback?.blockReason) {
-            throw new Error(`Blocked: ${result.promptFeedback.blockReason}`);
-          }
-          throw new Error('No candidates returned from Vertex AI.');
+          const blockReason = result.promptFeedback?.blockReason;
+          const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
+          throw new Error(`No candidates returned from Vertex AI. Finish Reason: ${result.candidates?.[0]?.finishReason || 'NONE'}${blockReason ? ` | Blocked: ${blockReason}` : ''}${usage}`);
         }
 
         const candidate = result.candidates[0];
+        const finishReason = candidate.finishReason;
 
-        if (candidate.finishReason === 'SAFETY') {
+        if (finishReason === 'SAFETY') {
           throw new Error('Response blocked due to safety settings.');
         }
 
         if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
-          throw new Error('Received empty content from Vertex AI.');
+          const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
+          const feedback = result.promptFeedback?.blockReason ? ` | Feedback: ${result.promptFeedback.blockReason}` : '';
+
+          if (finishReason === 'MAX_TOKENS') {
+            throw new Error(`Model reached the maximum output token limit (2048). Please try a shorter request or reduce the context.${usage}`);
+          }
+
+          if (finishReason === 'STOP' && i > 0) {
+            // Model stopped after tool calls but with no final text. 
+            // This can happen; we just finish gracefully.
+            return;
+          }
+
+          throw new Error(`Received empty content from Vertex AI. Finish Reason: ${finishReason}${feedback}${usage}`);
         }
 
         // Process all parts of the response
@@ -901,11 +914,11 @@ export class VertexService {
         }
 
         const errStr = error.message || String(error);
-        const is429 = errStr.includes('429') || 
-                      errStr.includes('RESOURCE_EXHAUSTED') || 
-                      errStr.includes('Resource exhausted') ||
-                      error.status === 429 || 
-                      error.code === 429;
+        const is429 = errStr.includes('429') ||
+          errStr.includes('RESOURCE_EXHAUSTED') ||
+          errStr.includes('Resource exhausted') ||
+          error.status === 429 ||
+          error.code === 429;
 
         if (!is429) {
           throw error;
