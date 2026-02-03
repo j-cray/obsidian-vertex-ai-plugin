@@ -33,10 +33,10 @@ interface MastermindSettings {
   savedPrompts: Array<{ name: string; content: string }>;
   defaultModel: string;
   availableModels: string[];
+  autoModelEnabled: boolean;
   // Generation Params
   maxOutputTokens: number;
   temperature: number;
-  modelTemperature: number;
 }
 
 const DEFAULT_SETTINGS: MastermindSettings = {
@@ -124,10 +124,10 @@ DO NOT create planning artifacts for:
 `,
   defaultModel: 'gemini-2.0-flash-exp',
   availableModels: [],
+  autoModelEnabled: false,
   maxOutputTokens: 8192,
   temperature: 0.7,
-  modelTemperature: 0.5,
-}
+};
 
 const PRECACHED_MODELS: string[] = [
   'gemini-3-pro',
@@ -433,15 +433,30 @@ class MastermindSettingTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: 'Model Selection' });
 
     new Setting(containerEl)
+      .setName('Enable Auto-Model Selection')
+      .setDesc('Automatically select the best model (Simple vs. Complex) based on your prompt.')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.autoModelEnabled)
+        .onChange(async (value) => {
+          this.plugin.settings.autoModelEnabled = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }));
+
+    const modelSetting = new Setting(containerEl)
       .setName('Gemini Model')
-      .setDesc('Select a supported Gemini model.')
+      .setDesc(this.plugin.settings.autoModelEnabled ? 'Base model (used if Auto fallback)' : 'Select a supported Gemini model.')
       .addDropdown(dropdown => {
         const options = this.plugin.settings.availableModels.length > 0
           ? this.plugin.settings.availableModels
           : [this.plugin.settings.modelId, 'gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'];
 
         const uniqueOptions = [...new Set(options)];
-        uniqueOptions.forEach(m => dropdown.addOption(m, m));
+
+        // Remove Auto option if it was there (it is via standard UI now)
+        uniqueOptions.forEach(m => {
+          if (m !== 'auto') dropdown.addOption(m, m);
+        });
 
         dropdown.setValue(this.plugin.settings.modelId);
         dropdown.onChange(async (value) => {
@@ -504,6 +519,10 @@ class MastermindSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           new Notice(`Reset to ${uniqueOptions.length} precached models.`);
         }));
+
+    if (this.plugin.settings.autoModelEnabled) {
+      modelSetting.controlEl.style.opacity = '0.6';
+    }
 
     containerEl.createEl('h3', { text: 'Generation Parameters' });
 
@@ -606,70 +625,6 @@ class MastermindSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.confirmTerminalDestructive = value;
           await this.plugin.saveSettings();
-        }));
-
-    // ===== APPEARANCE =====
-    containerEl.createEl('h3', { text: 'Appearance & Behavior' });
-
-    new Setting(containerEl)
-      .setName("Vault Read Access")
-      .setDesc("Allow AI to read files, search vault, list directories.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.permVaultRead)
-          .onChange(async (value) => {
-            this.plugin.settings.permVaultRead = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Vault Write Access")
-      .setDesc("Allow AI to create notes, update sections, append content.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.permVaultWrite)
-          .onChange(async (value) => {
-            this.plugin.settings.permVaultWrite = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    // Prompt Library Management
-    new Setting(containerEl)
-      .setName('Temperature')
-      .setDesc('Model creativity (0.0 = focused, 2.0 = creative). Lower values improve conversation consistency. Default for Gemini 3 Flash: 0.5')
-      .addSlider(slider => slider
-        .setLimits(0.0, 2.0, 0.1)
-        .setValue(this.plugin.settings.modelTemperature ?? 0.5)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.modelTemperature = value;
-          await this.plugin.saveSettings();
-        }));
-
-    // ===== GENERATION PARAMETERS =====
-    containerEl.createEl('h3', { text: 'Generation Parameters' });
-
-    new Setting(containerEl)
-      .setName('Temperature')
-      .setDesc('Model creativity (0.0 = focused, 2.0 = creative). Lower values improve conversation consistency. Recommended: 0.5')
-      .addSlider(slider => slider
-        .setLimits(0.0, 2.0, 0.1)
-        .setValue(this.plugin.settings.modelTemperature ?? 0.5)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.modelTemperature = value;
-          await this.plugin.saveSettings();
-        }))
-      .addButton(btn => btn
-        .setButtonText('Reset to Default')
-        .setWarning()
-        .onClick(async () => {
-          this.plugin.settings.modelTemperature = 0.5;
-          await this.plugin.saveSettings();
-          new Notice('Temperature reset to 0.5.');
-          this.display();
         }));
 
     containerEl.createEl('h3', { text: 'Custom Context Prompt' });

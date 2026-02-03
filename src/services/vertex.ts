@@ -72,7 +72,7 @@ export class VertexService {
       project: credentials.project_id,
       location: this.location || 'us-central1',
       apiEndpoint: apiHost,
-      googleAuth: {
+      googleAuthOptions: {
         credentials: {
           type: 'service_account',
           project_id: credentials.project_id,
@@ -84,7 +84,7 @@ export class VertexService {
           token_uri: credentials.token_uri,
           auth_provider_x509_cert_url: credentials.auth_provider_x509_cert_url,
           client_x509_cert_url: credentials.client_x509_cert_url,
-        }
+        } as any
       }
     });
 
