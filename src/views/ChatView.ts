@@ -299,8 +299,9 @@ export class MastermindChatView extends ItemView {
         this.plugin.settings.history.push(userMsg);
         this.plugin.settings.history.push(aiMsg);
 
-        if (this.plugin.settings.history.length > 50) {
-          this.plugin.settings.history = this.plugin.settings.history.slice(-50);
+        const historyLimit = this.plugin.settings.modelId.includes('pro') ? 200 : 50;
+        if (this.plugin.settings.history.length > historyLimit) {
+          this.plugin.settings.history = this.plugin.settings.history.slice(-historyLimit);
         }
 
         await this.plugin.saveSettings();

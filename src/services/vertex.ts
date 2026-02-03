@@ -688,7 +688,9 @@ export class VertexService {
           }
         });
       }
-      const parts: any[] = [{ text: `Context from vault:\n${context}\n\nUser Question: ${prompt}` }];
+      const parts: any[] = [{
+        text: `<vault_context>\n${context}\n</vault_context>\n\nUser Question: ${prompt}\n\n(Answer the user's question directly. If the question refers to previous conversation, prioritize the Chat History over the Vault Context.)`
+      }];
 
       for (const img of images) {
         parts.push({
