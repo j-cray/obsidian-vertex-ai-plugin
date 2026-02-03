@@ -441,10 +441,6 @@ class MastermindSettingTab extends PluginSettingTab {
           : [this.plugin.settings.modelId, 'gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'];
 
         const uniqueOptions = [...new Set(options)];
-
-        // Add Auto option at the top
-        dropdown.addOption('auto', '✨ Auto (Smart Selection)');
-
         uniqueOptions.forEach(m => dropdown.addOption(m, m));
 
         dropdown.setValue(this.plugin.settings.modelId);
