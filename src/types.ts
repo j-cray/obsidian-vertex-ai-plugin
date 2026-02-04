@@ -18,4 +18,7 @@ export interface ChatMessage {
   role: string;
   parts: { text: string }[];
   actions?: ToolAction[];
+  thinking?: string;
+  model?: string;
 }
+

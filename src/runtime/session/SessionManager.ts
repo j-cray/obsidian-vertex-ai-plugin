@@ -89,16 +89,18 @@ export class SessionManager {
           if (last.role === 'model') {
             if (chunk.parts) last.parts = chunk.parts;
             if (chunk.actions) last.actions = chunk.actions;
-            // Trigger bus events for UI streaming if needed
-            // For now, the store update is enough for reactive UI
+            if (chunk.thinking) last.thinking = chunk.thinking;
+            if (chunk.model) last.model = chunk.model;
 
+            // Trigger bus events for UI streaming if needed
             if (isThinking) {
-              this.runtime.bus.trigger('agent:thinking', chunk.parts?.[0]?.text);
+              this.runtime.bus.trigger('agent:thinking', chunk.thinking);
             }
           }
           return msgs;
         });
       };
+
 
       this.runtime.bus.trigger('agent:action:start', { type: 'chat', prompt: text });
 
@@ -113,22 +115,19 @@ export class SessionManager {
         if (signal?.aborted) break;
 
         if (chunk.isThinking) {
-          // Handle thinking updates?
-          // Currently ChatView handled it with a special flag.
-          // We can just log it or update a store property.
-          // For simplicity, we might append to text or handle specially if we had a thinking store.
-          // Re-using 'thinkingText' from types if available?
-          this.runtime.bus.trigger('agent:thinking', chunk.thinkingText);
+          updateLastMessage({ thinking: chunk.thinkingText }, true);
         } else {
           finalText = chunk.text;
           finalActions = chunk.actions || [];
 
           updateLastMessage({
             parts: [{ text: finalText }],
-            actions: finalActions
+            actions: finalActions,
+            model: chunk.acceptedModelId
           });
         }
       }
+
 
       // 5. Enhance Links (Post-processing)
       if (finalText && !signal?.aborted) {

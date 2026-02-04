@@ -189,31 +189,56 @@ export class MastermindChatView extends ItemView {
   renderMessages(messages: ChatMessage[]) {
     if (!this.messageRenderer) return;
 
-    this.messageContainer.empty();
-    this.messageRenderer.renderTo(this.messageContainer);
-
+    // Handle empty state
     if (messages.length === 0) {
-      this.messageRenderer.renderAIMessage('Greetings. I am Mastermind. Ready.', this.plugin.settings.profilePictureAI);
+      this.messageContainer.empty();
+      this.messageRenderer.renderAIMessage({
+        role: 'model',
+        parts: [{ text: 'Greetings. I am Mastermind. Ready.' }]
+      } as ChatMessage, this.plugin.settings.profilePictureAI);
       return;
     }
 
-    messages.forEach(msg => {
-      if (msg.role === 'user') {
-        // @ts-ignore
-        const text = msg.parts ? msg.parts[0].text : (msg as any).text; // Handle legacy history format if any
-        this.messageRenderer.renderUserMessage(text || '', this.plugin.settings.profilePictureUser);
-      } else {
-        // Model
-        // @ts-ignore
-        const text = msg.parts ? msg.parts[0].text : (msg as any).text;
-        this.messageRenderer.renderAIMessage(text || '', this.plugin.settings.profilePictureAI, msg.actions);
-      }
-    });
+    // Naive Diffing:
+    // If we have more messages than DOM nodes, append.
+    // If same number, update the last one (assuming it's the only one changing during streaming).
+    const domMessages = this.messageContainer.querySelectorAll('.chat-message-block');
+    const domCount = domMessages.length;
 
-    // Scroll to bottom
-    const last = this.messageContainer.lastElementChild;
-    if (last) last.scrollIntoView({ behavior: 'smooth' });
+    // If completely new chat (or clear), reset
+    if (domCount === 0 && messages.length > 0) {
+      this.messageContainer.empty();
+      messages.forEach(msg => this.appendMessage(msg));
+    } else if (messages.length > domCount) {
+      // Append new messages
+      for (let i = domCount; i < messages.length; i++) {
+        this.appendMessage(messages[i]);
+      }
+    } else if (messages.length === domCount) {
+      // Update the last message only (Streaming case)
+      const lastMsgIndex = messages.length - 1;
+      const lastMsg = messages[lastMsgIndex];
+      const lastDom = domMessages[domCount - 1] as HTMLElement;
+
+      this.messageRenderer.updateMessage(lastDom, lastMsg,
+        lastMsg.role === 'user' ? this.plugin.settings.profilePictureUser : this.plugin.settings.profilePictureAI
+      );
+    }
+
+    // Scroll to bottom logic could be smarter (only if near bottom)
+    // For now, keep simple
+    // const last = this.messageContainer.lastElementChild;
+    // if (last) last.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
+
+  appendMessage(msg: ChatMessage) {
+    if (msg.role === 'user') {
+      this.messageRenderer.renderUserMessage(msg, this.plugin.settings.profilePictureUser);
+    } else {
+      this.messageRenderer.renderAIMessage(msg, this.plugin.settings.profilePictureAI);
+    }
+  }
+
 
   async onSendMessage() {
     const text = this.inputEl.value.trim();
