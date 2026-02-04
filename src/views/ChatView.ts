@@ -198,8 +198,9 @@ export class MastermindChatView extends ItemView {
       this.updateLastMessageStatus(status);
     });
 
-    // Also listen to generating state to clear status
+    // Also listen to generating state to clear status and animation
     this.runtime.session.isGenerating.subscribe((isGen) => {
+      this.updateGenerationEffects(isGen);
       if (!isGen) {
         this.updateLastMessageStatus(null); // Clear status on finish
       } else {
@@ -207,6 +208,24 @@ export class MastermindChatView extends ItemView {
       }
     });
   }
+
+  updateGenerationEffects(isGen: boolean) {
+    if (!this.messageContainer) return;
+
+    // Update the last message block's animation state
+    const lastBlock = this.messageContainer.lastElementChild as HTMLElement;
+    if (lastBlock && lastBlock.classList.contains('chat-message-block') && lastBlock.dataset.role === 'model') {
+      if (isGen) {
+        lastBlock.addClass('pending-generation');
+      } else {
+        lastBlock.removeClass('pending-generation');
+      }
+    }
+
+    // Update send button state (already handled in renderInput but good to be centralized if refactored)
+    // The send button subscription is separate in renderInput.
+  }
+
 
   updateLastMessageStatus(status: string | null) {
     if (!this.messageContainer) return;

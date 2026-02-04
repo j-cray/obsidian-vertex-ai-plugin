@@ -551,6 +551,16 @@ export class VertexService {
       3. ACT: Execute tools to gather information or modify files.
       4. VERIFY: Ensure your actions achieved the goal.
 
+      THINKING PROTOCOL:
+      You generally should "think" before complicated actions.
+      To think, use a code block triggered by "thinking":
+      \`\`\`thinking
+      Here is my thought process...
+      \`\`\`
+      This block will be parsed and shown specially to the user.
+
+      5. VERIFY: Ensure your actions achieved the goal.
+
       You have access to the user's Obsidian Vault. Prioritize accuracy and preserving user data.`;
 
       // @ts-ignore
