@@ -819,8 +819,26 @@ export class VertexService {
             };
 
             if (attempt < maxAttempts) {
+              // --- NUDGE: Modify request to include a repair prompt ---
+              // Clone the request config to avoid mutating the original for subsequent retries if we wanted (though here we want accumulated history)
+              // Actually, we just want to append to the *current* request context for the NEXT try.
+
+              const repairMessage = {
+                role: 'user',
+                parts: [{ text: `[System Warning] The previous tool call was malformed (finishReason: ${finishReason}). Please verify the JSON syntax, escape special characters in string arguments, and try again.` }]
+              };
+
+              // We need to ensure we don't just keep appending if we retry multiple times?
+              // Ideally, we'd replace the last one if it was already a repair message?
+              // For simplicity in V1, let's just append. The model will see the history of failures.
+              // We need to cast because the types might be strict.
+              if (requestConfig.contents) {
+                requestConfig.contents = [...requestConfig.contents, repairMessage];
+              }
+
               continue; // Loop again
             }
+
 
             // If we ran out of attempts, fall through to error handling
           } else {
