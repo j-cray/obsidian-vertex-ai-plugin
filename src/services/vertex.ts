@@ -642,11 +642,17 @@ export class VertexService {
 
       const tools: any[] = [{ function_declarations: functionDeclarations }];
 
-      if (this.permWeb) {
-        // Enable Native Google Search Grounding
-        tools.push({ googleSearch: {} });
+      // FIX: "Multiple tools are supported only when they are all search tools"
+      // If we have function declarations, we CANNOT mix in googleSearch unless we are very careful (and usually not at all with current API).
+      // Since we have 'fetch_url' as a custom tool, we should rely on that or other Tools.
+      // We explicitly disable googleSearch object here to prevent the conflict.
 
+      /*
+      if (this.permWeb) {
+         // Enable Native Google Search Grounding
+         // tools.push({ googleSearch: {} });
       }
+      */
 
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
