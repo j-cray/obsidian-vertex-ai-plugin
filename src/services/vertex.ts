@@ -5,6 +5,10 @@ import { VertexAI } from '@google-cloud/vertexai';
 // @ts-ignore
 import { ModelServiceClient } from '@google-cloud/aiplatform';
 import { getModelDefinition, PRECACHED_MODELS } from '../config/models';
+import { ModelRouter } from '../ai/ModelRouter';
+import { ToolRouter } from '../ai/ToolRouter';
+
+
 
 
 
@@ -474,72 +478,8 @@ export class VertexService {
     return results;
   }
 
-  private selectModel(prompt: string, images: any[]): string {
-    console.log('Mastermind DEBUG: Auto-selecting model...');
-    const p = prompt.toLowerCase();
 
-    // 1. Image Generation Intent
-    // "create an image", "draw a picture", "make a sketch"
-    const imageGenRegex = /(?:generate|create|make|draw).*(?:image|picture|photo|sketch|diagram)/i;
-    if (imageGenRegex.test(p) || (images.length > 0 && (p.includes('edit') || p.includes('change') || p.includes('modify')))) {
-      console.log('Mastermind DEBUG: Auto-selection: IMAGE_GEN detected.');
-      // Prefer Imagen 3 if available, else best multimodal
-      // Since we don't have a live "available" list inside this method efficiently without strict checking,
-      // we'll rely on what we know or fallbacks.
-      // Ideally we check this.settings.availableModels if passed, but for now we hardcode preference.
-      return 'imagen-3.0-generate-001';
-    }
 
-    // 2. Multimodal Input
-    if (images.length > 0) {
-      console.log('Mastermind DEBUG: Auto-selection: Multimodal input detected -> COMPLEX.');
-      return 'gemini-3-pro-preview';
-    }
-
-    // 3. Complexity Scoring
-    let score = 0;
-    const words = p.split(/\s+/).length;
-
-    // Length
-    if (words > 50) score += 1;
-    if (words > 200) score += 2;
-
-    // Structure
-    if (p.includes('```')) score += 2;
-
-    // Keywords (Weighted)
-    const reasoningKeywords = ['analyze', 'compare', 'note', 'evaluate', 'why', 'how', 'impact', 'consequence'];
-    const engineeringKeywords = ['refactor', 'architect', 'security', 'optimize', 'debug', 'api', 'database', 'interface', 'class'];
-    const constraintsKeywords = ['step-by-step', 'chain of thought', 'json', 'csv'];
-    const creativeKeywords = ['poem', 'story', 'script', 'novel', 'creative'];
-    const mathKeywords = ['calculate', 'solve', 'equation', 'logic', 'math'];
-
-    reasoningKeywords.forEach(k => { if (p.includes(k)) score += 1; });
-
-    // Engineering terms usually imply heavy lifting, add once heavily
-    if (engineeringKeywords.some(k => p.includes(k))) score += 2;
-
-    if (constraintsKeywords.some(k => p.includes(k))) score += 2;
-    if (creativeKeywords.some(k => p.includes(k))) score += 1;
-    if (mathKeywords.some(k => p.includes(k))) score += 2;
-
-    console.log(`Mastermind DEBUG: Auto-selection Score: ${score} (Words: ${words})`);
-
-    // Threshold
-    if (score >= 4) {
-      console.log('Mastermind DEBUG: Auto-selection: COMPLEX tier.');
-      // Find best modern Pro model
-      const complexModel = PRECACHED_MODELS.find(m => m.id.includes('pro') && m.isModern)?.id || 'gemini-3-pro-preview';
-      return complexModel;
-    }
-
-    // Default to Simple
-    console.log('Mastermind DEBUG: Auto-selection: SIMPLE tier.');
-    // Find best modern Flash model
-    const simpleModel = PRECACHED_MODELS.find(m => m.id.includes('flash') && m.isModern)?.id || 'gemini-3-flash';
-    return simpleModel;
-
-  }
 
   async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], userProfile: string = '', toolRegistry?: any, signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
 
@@ -550,10 +490,11 @@ export class VertexService {
 
     // Auto-Model Selection
     if (this.autoModelEnabled) {
-      const selected = this.selectModel(prompt, images);
+      const selected = ModelRouter.selectModel(prompt, images.length);
       console.log(`Mastermind: Auto-switched model to ${selected}`);
       modelId = selected;
     }
+
 
 
     try {
@@ -964,26 +905,27 @@ export class VertexService {
             let status: 'success' | 'error' = 'success';
 
             try {
-              if (toolRegistry && toolRegistry.has(name)) {
-                const tool = toolRegistry.get(name);
-                // Use the public runtime property from ToolRegistry
-                const runtime = toolRegistry.runtime;
-                result = await tool.execute(args, runtime);
+              // const toolContext = {
+              //   permWeb: this.permWeb,
+              //   permTerminal: this.permTerminal,
+              //   confirmTerminalDestructive: this.confirmTerminalDestructive,
+              //   fetchUrl: this.fetchUrl.bind(this),
+              //   runShellCommand: this.runShellCommand.bind(this)
+              // };
 
-              } else if (name === 'fetch_url') {
-                if (!this.permWeb) throw new Error('Web access disabled.');
-                result = await this.fetchUrl(args.url);
-              } else if (name === 'run_shell_command') {
-                if (!this.permTerminal) throw new Error('Terminal disabled.');
-                if (this.confirmTerminalDestructive) result = { status: 'error', message: 'Terminal confirmation required (not implemented in streaming yet).' };
-                else result = await this.runShellCommand(String(args.command || ''));
-              } else {
-                throw new Error(`Unknown tool: ${name}`);
-              }
+              result = await ToolRouter.routeAndExecute(name, args, toolRegistry, {
+                permWeb: this.permWeb,
+                permTerminal: this.permTerminal,
+                confirmTerminalDestructive: this.confirmTerminalDestructive,
+                fetchUrl: this.fetchUrl.bind(this),
+                runShellCommand: this.runShellCommand.bind(this)
+              });
+
             } catch (err: any) {
               result = { status: 'error', message: err.message };
               status = 'error';
             }
+
 
             toolActions[idx].output = result;
             toolActions[idx].status = status;
@@ -1036,7 +978,8 @@ export class VertexService {
     }
   }
 
-  private async fetchUrl(rawUrl: string): Promise<{ status: string; url: string; statusCode: number; headers: Record<string, string>; body: string; truncated: boolean }> {
+  async fetchUrl(rawUrl: string): Promise<{ status: string; url: string; statusCode: number; headers: Record<string, string>; body: string; truncated: boolean }> {
+
     const url = (rawUrl || '').trim();
     if (!/^ https ?: \/\//i.test(url)) {
       throw new Error('Only http/https URLs are allowed.');
@@ -1057,7 +1000,8 @@ export class VertexService {
     };
   }
 
-  private async runShellCommand(command: string): Promise<{ status: string; stdout: string; stderr: string; exitCode: number; truncated: boolean }> {
+  async runShellCommand(command: string): Promise<{ status: string; stdout: string; stderr: string; exitCode: number; truncated: boolean }> {
+
     const cmd = command.trim();
     if (!cmd) {
       throw new Error('Command is empty.');
