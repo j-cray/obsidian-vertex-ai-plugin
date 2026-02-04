@@ -449,4 +449,16 @@ export class VaultService {
   private escapeRegExp(string: string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
+
+  async getUserProfile(): Promise<string> {
+    const profilePath = 'Mastermind/User Profile.md';
+    try {
+      const content = await this.readNote(profilePath);
+      return content;
+    } catch (e) {
+      // Return empty if profile doesn't exist yet
+      return '';
+    }
+  }
 }
+

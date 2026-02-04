@@ -542,7 +542,28 @@ export class VertexService {
         model: modelId,
       });
 
-      const systemInstructionText = this.customContextPrompt || 'You are Mastermind, an AI assistant for Obsidian with access to the vault.';
+      let systemInstructionText = this.customContextPrompt ||
+        `You are Mastermind, an intelligent Orchestrator for Obsidian.
+
+      CORE OPERATING PROTOCOL:
+      1. ANALYZE: Understand the user's request and the current vault context.
+      2. PLAN: For complex requests, use the 'propose_plan' tool to outline your steps.
+      3. ACT: Execute tools to gather information or modify files.
+      4. VERIFY: Ensure your actions achieved the goal.
+
+      You have access to the user's Obsidian Vault. Prioritize accuracy and preserving user data.`;
+
+
+      // Inject User Profile (Memory)
+      try {
+        const userProfile = await vaultService.getUserProfile();
+        if (userProfile && userProfile.trim().length > 0) {
+          systemInstructionText += `\n\n<user_profile>\n${userProfile}\n</user_profile>\n(Adapt your personality and responses according to this profile.)`;
+        }
+      } catch (e) {
+        console.warn('Mastermind: Failed to load user profile.', e);
+      }
+
 
       const functionDeclarations: any[] = [
         {
@@ -634,8 +655,25 @@ export class VertexService {
             },
             required: ['path']
           }
+        },
+        {
+          name: "propose_plan",
+          description: "Proposes a step-by-step plan for a complex task. Use this before executing destructive computations or multi-file refactors.",
+          parameters: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Title of the plan." },
+              steps: {
+                type: "array",
+                items: { type: "string" },
+                description: "List of steps to execute."
+              }
+            },
+            required: ["title", "steps"]
+          }
         }
       ];
+
 
       if (this.permWeb) {
         functionDeclarations.push({
