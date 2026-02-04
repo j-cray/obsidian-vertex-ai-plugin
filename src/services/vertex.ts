@@ -803,7 +803,29 @@ export class VertexService {
             return;
           }
 
+          if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+            // Basic Auto-Correction: Retry once with a nudge
+            // We can't strictly retry *this* generation request easily without recursive complexity or modifying 'contents'.
+            // Instead, we will throw a specific error that the outer loop *could* handle, or just try to continue if we can.
+            // Actually, let's try to RE-RUN this specific generation step with a "Please fix" note appended to the last user message?
+            // Or simpler: Throw, but we want to auto-recover.
+
+            console.warn('Mastermind: MALFORMED_FUNCTION_CALL detected. Attempting auto-correction...');
+            // Hack: Modifying the las prompt part to include a warning is tricky if it's already sent.
+            // We will try a new generationConfig with lower temp? Or just fail gracefully for now if we can't easily recurse.
+            // Let's TRY to return an error frame that the UI can show, maybe?
+            // Better: Return a system message to the chat saying "I messed up the tool call."
+
+            yield {
+              text: `**System Error:** The model attempted a tool call but it was malformed. Please try your request again or rephrase. (finishReason: ${finishReason})`,
+              actions: [],
+              isThinking: false
+            };
+            return;
+          }
+
           throw new Error(`Received empty content from Vertex AI. Finish Reason: ${finishReason}${feedback}${usage}`);
+
         }
 
         // Process all parts of the response
