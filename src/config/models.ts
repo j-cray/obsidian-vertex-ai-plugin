@@ -17,14 +17,7 @@ export const PRECACHED_MODELS: ModelDefinition[] = [
     isModern: true,
     provider: 'google'
   },
-  {
-    id: 'gemini-3-flash',
-    maxInputTokens: 1048576,
-    maxOutputTokens: 8192,
-    contextWindow: 1048576,
-    isModern: true,
-    provider: 'google'
-  },
+
   {
     id: 'gemini-3-pro-preview',
     maxInputTokens: 2097152,
