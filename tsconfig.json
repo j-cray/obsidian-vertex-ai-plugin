@@ -17,9 +17,6 @@
       "ES6",
       "ESNext"
     ],
-    "types": [
-      "node"
-    ]
   },
   "include": [
     "src/**/*.ts"
