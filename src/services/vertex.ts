@@ -2,7 +2,9 @@ import { App, TFile, requestUrl, Notice } from 'obsidian';
 import { exec as cpExec } from 'child_process';
 import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
+// @ts-ignore
 import { ModelServiceClient } from '@google-cloud/aiplatform';
+
 
 export class VertexService {
   private serviceAccountJson!: string;
