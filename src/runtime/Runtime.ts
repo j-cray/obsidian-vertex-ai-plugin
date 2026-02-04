@@ -9,6 +9,13 @@ import { ActionBus } from './bus/ActionBus';
 import { TraceLogger } from './telemetry/TraceLogger';
 import { VertexService } from '../services/vertex';
 import { VaultService } from '../services/vault';
+import { VectorStore } from '../services/vector';
+import { VaultReader, VaultLister } from '../tools/VaultReader';
+import { VaultSearch } from '../tools/VaultSearch';
+import { VaultWriter } from '../tools/VaultWriter';
+
+
+
 
 /**
  * The Central Nervous System of the Agent.
@@ -29,6 +36,8 @@ export class AgentRuntime {
   // Services
   public vertex: VertexService;
   public vault: VaultService;
+  public vector: VectorStore;
+
 
   private constructor(plugin: MastermindPlugin) {
     this.plugin = plugin;
@@ -43,6 +52,16 @@ export class AgentRuntime {
     // Initialize services
     this.vertex = new VertexService(plugin.settings);
     this.vault = new VaultService(plugin.app);
+    this.vector = new VectorStore(this);
+
+    // Register Tools
+    this.tools.register(new VaultReader(this));
+    this.tools.register(new VaultLister(this));
+    this.tools.register(new VaultSearch(this));
+    this.tools.register(new VaultWriter(this));
+
+
+
 
     // Listen for settings changes
     this.plugin.onSettingsChange(() => {

@@ -515,7 +515,7 @@ export class VertexService {
     console.log('Mastermind DEBUG: Auto-selection: SIMPLE tier.');
 
     // Prefer 2.5 Flash if we think it's available (it's new), else 2.0 Flash
-    // We can just return the ID, and if it fails, the user will see. 
+    // We can just return the ID, and if it fails, the user will see.
     // But better to be safe? No, let's trust the defaults we planned.
     return 'gemini-2.5-flash';
   }
@@ -528,7 +528,7 @@ export class VertexService {
     // Auto-Model Selection
     if (modelId === 'auto') {
       const selected = this.selectModel(prompt, images);
-      // Verify fallbacks if specific models aren't available? 
+      // Verify fallbacks if specific models aren't available?
       // For now, we assume the user has access to standard models if they use Auto.
       // We can add a quick check if we had the availableModels list handy, but that's in settings.
       // Basic fallback logic for safety:
@@ -665,7 +665,13 @@ export class VertexService {
         });
       }
 
-      const tools = [{ functionDeclarations: functionDeclarations }];
+      const tools: any[] = [{ function_declarations: functionDeclarations }];
+
+      if (this.permWeb) {
+        // Enable Native Google Search Grounding
+        tools.push({ googleSearchRetrieval: {} });
+      }
+
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
       let contents: any[] = [];
@@ -754,7 +760,7 @@ export class VertexService {
           }
 
           if (finishReason === 'STOP' && i > 0) {
-            // Model stopped after tool calls but with no final text. 
+            // Model stopped after tool calls but with no final text.
             // This can happen; we just finish gracefully.
             return;
           }
@@ -1003,8 +1009,26 @@ export class VertexService {
     };
   }
 
+  async getEmbeddings(text: string): Promise<number[]> {
+    try {
+      const client = this.getVertexClient();
+      const model = client.getGenerativeModel({ model: 'text-embedding-004' });
+      const result = await (model as any).embedContent(text);
+
+
+      if (!result.embedding || !result.embedding.values) {
+        throw new Error('No embedding returned.');
+      }
+      return result.embedding.values;
+    } catch (error) {
+      console.error('Mastermind: Failed to get embeddings.', error);
+      throw error;
+    }
+  }
+
   private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 10, initialDelay: number = 2000): Promise<T> {
     let retries = 0;
+
     while (true) {
       try {
         return await operation();

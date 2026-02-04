@@ -59,6 +59,31 @@ export class VaultService {
     throw new Error(`File not found or not a markdown file: ${path}`);
   }
 
+  async readNote(path: string): Promise<string> {
+    return this.getFileContent(path);
+  }
+
+  async listNotes(limit?: number): Promise<string[]> {
+    const files = this.app.vault.getMarkdownFiles().map(f => f.path);
+    if (limit) {
+      return files.slice(0, limit);
+    }
+    return files;
+  }
+
+  async listFolderContents(path: string): Promise<string[]> {
+    if (path === '/' || path === '') {
+      return this.app.vault.getRoot().children.map(c => c.path);
+    }
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    if (!folder) throw new Error(`Folder not found: ${path}`);
+    // @ts-ignore
+    if (!folder.children) throw new Error(`Path is not a folder: ${path}`);
+    // @ts-ignore
+    return folder.children.map(c => c.path);
+  }
+
+
   async getActiveNoteImages(): Promise<{ mimeType: string, data: string }[]> {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) return [];
@@ -116,6 +141,15 @@ export class VaultService {
 
     return results;
   }
+
+  async modifyNote(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      throw new Error(`File not found: ${path}`);
+    }
+    await this.app.vault.modify(file, content);
+  }
+
 
   async createFolder(path: string): Promise<void> {
     if (!await this.app.vault.adapter.exists(path)) {
