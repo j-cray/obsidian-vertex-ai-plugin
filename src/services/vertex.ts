@@ -669,7 +669,8 @@ export class VertexService {
 
       if (this.permWeb) {
         // Enable Native Google Search Grounding
-        tools.push({ googleSearchRetrieval: {} });
+        tools.push({ googleSearch: {} });
+
       }
 
 
