@@ -591,40 +591,30 @@
 }
 
 /* 2. Enhanced Agent Status Bar */
-.agent-status-bar {
-    position: absolute;
-    bottom: 80px;
-    /* Above input area */
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(30, 30, 35, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 11px;
-    color: var(--text-muted);
-    display: flex;
+/* 2. Integrated Status Chip */
+.chat-status-chip {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    z-index: 100;
-    transition: opacity 0.3s, transform 0.3s;
-    opacity: 0;
-    pointer-events: none;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: rgba(var(--mono-rgb-100), 0.05);
+    padding: 4px 10px;
+    border-radius: 12px;
+    margin-top: 8px;
+    margin-bottom: 4px;
+    animation: fade-in 0.3s ease;
+    border: 1px solid rgba(var(--mono-rgb-100), 0.1);
 }
 
-.agent-status-bar.visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-}
-
-.status-spinner {
-    width: 8px;
-    height: 8px;
-    border: 1px solid var(--text-muted);
-    border-top-color: var(--accent-color);
+.chat-status-chip::before {
+    content: '';
+    display: block;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
+    border: 2px solid var(--text-muted);
+    border-top-color: var(--interactive-accent);
     animation: spin 1s linear infinite;
 }
 
@@ -633,6 +623,19 @@
         transform: rotate(360deg);
     }
 }
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 
 /* 3. Enhanced Tool Chips (State Colors) */
 .tool-action-card {

@@ -14,7 +14,7 @@ export class MastermindChatView extends ItemView {
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelLabel!: HTMLElement;
-  statusBarEl!: HTMLElement;
+
 
   // Local state mirrored from store for rendering optimization if needed
 
@@ -46,8 +46,7 @@ export class MastermindChatView extends ItemView {
     // --- TOOLBAR ---
     this.renderToolbar(container);
 
-    // --- STATUS BAR ---
-    this.renderStatusBar(container);
+
 
     // --- MESSAGES ---
 
@@ -125,39 +124,7 @@ export class MastermindChatView extends ItemView {
 
 
 
-  renderStatusBar(container: HTMLElement) {
-    this.statusBarEl = container.createDiv('agent-status-bar');
-    // Spinner
-    this.statusBarEl.createDiv('status-spinner');
-    // Text
-    this.statusBarEl.createSpan({ text: 'Initializing...' });
 
-    // Subscribe to status events from bus
-    this.runtime.bus.on('agent:status:update', (status: string) => {
-      this.updateStatusBar(status);
-    });
-
-    this.runtime.bus.on('agent:thinking', (text: string) => {
-      this.updateStatusBar("Thinking...");
-    });
-
-    // Also listen to generating state to hide/show
-    this.runtime.session.isGenerating.subscribe((isGen) => {
-      if (isGen) {
-        this.statusBarEl.addClass('visible');
-        this.updateStatusBar("Working...");
-      } else {
-        this.statusBarEl.removeClass('visible');
-      }
-    });
-  }
-
-  updateStatusBar(text: string) {
-    if (this.statusBarEl) {
-      const span = this.statusBarEl.querySelector('span');
-      if (span) span.innerText = text;
-    }
-  }
 
   renderInput(container: HTMLElement) {
 
@@ -224,10 +191,30 @@ export class MastermindChatView extends ItemView {
     // Subscribe to telemetry/bus for "Thinking"
     // Actually, SessionManager updates the message with 'thinkingText' in types if we added it,
     // OR we listen to bus.
-    // ChatView used to show "Thinking..." manually.
-    // The renderer handles it if the message has content or if we pass a flag.
-    // For now, let's rely on message updates.
+
+    // Status Chip Updates (Ephemeral)
+    this.runtime.bus.on('agent:status:update', (status: string) => {
+      this.updateLastMessageStatus(status);
+    });
+
+    // Also listen to generating state to clear status
+    this.runtime.session.isGenerating.subscribe((isGen) => {
+      if (!isGen) {
+        this.updateLastMessageStatus(null); // Clear status on finish
+      } else {
+        this.updateLastMessageStatus("Working...");
+      }
+    });
   }
+
+  updateLastMessageStatus(status: string | null) {
+    if (!this.messageContainer) return;
+    const lastBlock = this.messageContainer.lastElementChild as HTMLElement;
+    if (lastBlock && lastBlock.classList.contains('chat-message-block') && lastBlock.dataset.role === 'model') {
+      this.messageRenderer.updateStatus(lastBlock, status);
+    }
+  }
+
 
   renderMessages(messages: ChatMessage[]) {
     if (!this.messageRenderer) return;

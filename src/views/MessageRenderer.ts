@@ -157,6 +157,34 @@ export class MessageRenderer {
     }
   }
 
+  updateStatus(dom: HTMLElement, status: string | null) {
+    const contentContainer = dom.querySelector('.chat-message-content') as HTMLElement;
+    if (!contentContainer) return;
+
+    let statusChip = contentContainer.querySelector('.chat-status-chip') as HTMLElement;
+
+    if (!status) {
+      if (statusChip) statusChip.remove();
+      return;
+    }
+
+    if (!statusChip) {
+      statusChip = contentContainer.createDiv('chat-status-chip');
+      // Insert effectively at bottom (before model chip if any)
+      const modelChip = contentContainer.querySelector('.model-footer-chip');
+      if (modelChip) {
+        contentContainer.insertBefore(statusChip, modelChip);
+      } else {
+        contentContainer.appendChild(statusChip);
+      }
+    }
+
+    statusChip.innerText = status;
+    // Ensure specific style for visibility
+    statusChip.style.display = 'block';
+  }
+
+
 
   startAIMessage(avatarUrl: string) {
     const msgBlock = this.container.createDiv('chat-message-block message-block-ai');
