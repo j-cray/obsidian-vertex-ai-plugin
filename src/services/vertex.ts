@@ -4,6 +4,8 @@ import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
 // @ts-ignore
 import { ModelServiceClient } from '@google-cloud/aiplatform';
+import { getModelDefinition } from '../config/models';
+
 
 
 export class VertexService {
@@ -18,6 +20,8 @@ export class VertexService {
   private confirmTerminalDestructive: boolean = true;
   private modelTemperature: number = 0.5;
   private maxOutputTokens: number = 8192;
+  private maxOutputTokensAuto: boolean = true;
+
 
 
   private getApiHost(location: string): string {
@@ -29,7 +33,8 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number }) {
+  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number, maxOutputTokensAuto?: boolean }) {
+
 
     this.serviceAccountJson = settings.serviceAccountJson;
     this.aiStudioKey = settings.aiStudioKey || '';
@@ -41,7 +46,9 @@ export class VertexService {
     this.confirmTerminalDestructive = settings.confirmTerminalDestructive ?? true;
     this.modelTemperature = settings.modelTemperature ?? 0.5;
     this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
+    this.maxOutputTokensAuto = settings.maxOutputTokensAuto ?? true;
     this.vertexClient = null; // Reset client on settings change
+
 
   }
 
@@ -660,10 +667,27 @@ export class VertexService {
           return;
         }
 
+        let outputLimit = this.maxOutputTokens;
+        if (this.maxOutputTokensAuto) {
+          const def = getModelDefinition(modelId);
+          if (def) {
+            outputLimit = def.maxOutputTokens;
+          } else {
+            // Heuristic for unknown models
+            if (modelId.includes('flash') || modelId.includes('pro')) {
+              outputLimit = 8192;
+            } else {
+              outputLimit = 2048;
+            }
+          }
+        }
+
+
         const generationConfig = {
           temperature: this.modelTemperature,
-          maxOutputTokens: this.maxOutputTokens,
+          maxOutputTokens: outputLimit,
         };
+
 
 
         const requestConfig: any = {

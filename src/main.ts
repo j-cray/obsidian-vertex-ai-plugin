@@ -9,6 +9,8 @@ import {
 import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/ChatView";
 import { VertexService } from "./services/vertex";
 import { AgentRuntime } from "./runtime/Runtime";
+import { PRECACHED_MODELS } from "./config/models";
+
 
 interface MastermindSettings {
   // Authentication
@@ -43,8 +45,10 @@ interface MastermindSettings {
   autoModelEnabled: boolean;
   // Generation Params
   maxOutputTokens: number;
+  maxOutputTokensAuto: boolean;
   temperature: number;
 }
+
 
 const DEFAULT_SETTINGS: MastermindSettings = {
   authProvider: 'vertex',
@@ -140,59 +144,12 @@ DO NOT create planning artifacts for:
   availableModels: [],
   autoModelEnabled: false,
   maxOutputTokens: 8192,
+  maxOutputTokensAuto: true,
   temperature: 0.7,
 };
 
-const PRECACHED_MODELS: string[] = [
-  'gemini-3-pro',
-  'gemini-3-flash',
-  'gemini-2.5-flash-image',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash-live-api',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-3-pro-preview',
-  'gemini-3-flash-preview',
-  'gemini-3-pro-image',
-  'gemma-3n',
-  'gemma-3',
-  'gemma-2',
-  'gemma',
-  'shieldgemma-2',
-  'paligemma',
-  'codegemma',
-  'txgemma',
-  'medgemma',
-  'medsiglip',
-  't5gemma',
-  'text-embedding-005',
-  'text-embedding-004',
-  'text-multilingual-embedding-002',
-  'multimodalembedding',
-  'imagen-4.0-generate-001',
-  'imagen-4.0-fast-generate-001',
-  'imagen-4.0-ultra-generate-001',
-  'imagen-3.0-generate-002',
-  'imagen-3.0-generate-001',
-  'imagen-3.0-fast-generate-001',
-  'imagen-3.0-capability-001',
-  'imagen-virtual-try-on-preview',
-  'imagen-product-recontext-preview',
-  'veo-2.0-generate-001',
-  'veo-3.0-generate-001',
-  'veo-3.0-fast-generate-001',
-  'veo-3.1-generate-001',
-  'veo-3.1-fast-generate-001',
-  'veo-3.0-generate-preview',
-  'veo-3.0-fast-generate-preview',
-  'veo-3.1-generate-preview',
-  'veo-3.1-fast-generate-preview',
-  'veo-2.0-generate-exp',
-  'medlm-medium',
-  'medlm-large',
-];
+
+
 
 export default class MastermindPlugin extends Plugin {
   settings!: MastermindSettings;
@@ -517,11 +474,12 @@ class MastermindSettingTab extends PluginSettingTab {
         .setTooltip('Reset to precached models')
         .onClick(async () => {
           const dd = this.modelDropdown;
-          const uniqueOptions = [...new Set(PRECACHED_MODELS)];
+          const uniqueOptions = [...new Set(PRECACHED_MODELS.map(m => m.id))];
           if (uniqueOptions.length === 0) {
             new Notice('No precached models available.');
             return;
           }
+
 
           // @ts-ignore
           dd.selectEl.innerHTML = '';
@@ -545,16 +503,32 @@ class MastermindSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Max Output Tokens')
-      .setDesc('Maximum number of tokens to generate (e.g., 8192).')
-      .addText(text => text
-        .setValue(String(this.plugin.settings.maxOutputTokens))
+      .setDesc('Maximum number of tokens to generate.')
+      .addToggle(toggle => toggle
+        .setTooltip('Auto (Set to model limit)')
+        .setValue(this.plugin.settings.maxOutputTokensAuto)
         .onChange(async (value) => {
-          const numeric = parseInt(value);
-          if (!isNaN(numeric)) {
-            this.plugin.settings.maxOutputTokens = numeric;
-            await this.plugin.saveSettings();
-          }
-        }));
+          this.plugin.settings.maxOutputTokensAuto = value;
+          await this.plugin.saveSettings();
+          this.display(); // Refresh to update input usage
+        }))
+      .addText(text => {
+        text
+          .setPlaceholder('e.g. 8192')
+          .setValue(String(this.plugin.settings.maxOutputTokens))
+          .setDisabled(this.plugin.settings.maxOutputTokensAuto)
+          .onChange(async (value) => {
+            const numeric = parseInt(value);
+            if (!isNaN(numeric)) {
+              this.plugin.settings.maxOutputTokens = numeric;
+              await this.plugin.saveSettings();
+            }
+          });
+        if (this.plugin.settings.maxOutputTokensAuto) {
+          text.inputEl.style.opacity = '0.5';
+        }
+      });
+
 
     new Setting(containerEl)
       .setName('Temperature')
