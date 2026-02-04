@@ -772,6 +772,7 @@ export class VertexService {
 
         let candidate;
         let finishReason;
+        let result;
 
         // --- RETRY LOOP FOR MALFORMED CALLS ---
         let attempt = 0;
@@ -783,7 +784,7 @@ export class VertexService {
             return await generativeModel.generateContent(requestConfig);
           });
 
-          const result = response.response;
+          result = response.response;
 
           if (!result.candidates || result.candidates.length === 0) {
             // ... error handling for no candidates ...
