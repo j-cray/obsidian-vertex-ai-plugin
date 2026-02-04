@@ -322,7 +322,9 @@ export class MessageRenderer {
     for (const action of actions) {
       const toolCard = actionContainer.createDiv('tool-action-card');
       if (action.status === 'error') toolCard.addClass('tool-error');
+      if (action.status === 'success') toolCard.addClass('tool-success');
       if (action.status === 'pending') toolCard.addClass('tool-pending');
+
 
       // Header
       const header = toolCard.createDiv('tool-header');

@@ -14,8 +14,10 @@ export class MastermindChatView extends ItemView {
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelLabel!: HTMLElement;
+  statusBarEl!: HTMLElement;
 
   // Local state mirrored from store for rendering optimization if needed
+
   // But we will try to just re-render on changes or optimize renderer later.
 
   constructor(leaf: WorkspaceLeaf, plugin: MastermindPlugin) {
@@ -44,7 +46,11 @@ export class MastermindChatView extends ItemView {
     // --- TOOLBAR ---
     this.renderToolbar(container);
 
+    // --- STATUS BAR ---
+    this.renderStatusBar(container);
+
     // --- MESSAGES ---
+
     this.messageContainer = container.createDiv('chat-messages');
     this.messageRenderer = new MessageRenderer(this.app, this.messageContainer);
 
@@ -117,7 +123,44 @@ export class MastermindChatView extends ItemView {
     };
   }
 
+
+
+  renderStatusBar(container: HTMLElement) {
+    this.statusBarEl = container.createDiv('agent-status-bar');
+    // Spinner
+    this.statusBarEl.createDiv('status-spinner');
+    // Text
+    this.statusBarEl.createSpan({ text: 'Initializing...' });
+
+    // Subscribe to status events from bus
+    this.runtime.bus.on('agent:status:update', (status: string) => {
+      this.updateStatusBar(status);
+    });
+
+    this.runtime.bus.on('agent:thinking', (text: string) => {
+      this.updateStatusBar("Thinking...");
+    });
+
+    // Also listen to generating state to hide/show
+    this.runtime.session.isGenerating.subscribe((isGen) => {
+      if (isGen) {
+        this.statusBarEl.addClass('visible');
+        this.updateStatusBar("Working...");
+      } else {
+        this.statusBarEl.removeClass('visible');
+      }
+    });
+  }
+
+  updateStatusBar(text: string) {
+    if (this.statusBarEl) {
+      const span = this.statusBarEl.querySelector('span');
+      if (span) span.innerText = text;
+    }
+  }
+
   renderInput(container: HTMLElement) {
+
     const inputWrapper = container.createDiv("chat-input-wrapper");
     const inputContainer = inputWrapper.createDiv("chat-input-container");
 
@@ -212,9 +255,10 @@ export class MastermindChatView extends ItemView {
     } else if (messages.length > domCount) {
       // Append new messages
       for (let i = domCount; i < messages.length; i++) {
-        this.appendMessage(messages[i]);
+        this.appendMessage(messages[i], i === messages.length - 1 && this.runtime.session.isGenerating.get());
       }
     } else if (messages.length === domCount) {
+
       // Update the last message only (Streaming case)
       const lastMsgIndex = messages.length - 1;
       const lastMsg = messages[lastMsgIndex];
@@ -223,7 +267,15 @@ export class MastermindChatView extends ItemView {
       this.messageRenderer.updateMessage(lastDom, lastMsg,
         lastMsg.role === 'user' ? this.plugin.settings.profilePictureUser : this.plugin.settings.profilePictureAI
       );
+
+      // Toggle Pulse Animation
+      if (this.runtime.session.isGenerating.get()) {
+        lastDom.addClass('pending-generation');
+      } else {
+        lastDom.removeClass('pending-generation');
+      }
     }
+
 
     // Scroll to bottom logic could be smarter (only if near bottom)
     // For now, keep simple
@@ -231,13 +283,28 @@ export class MastermindChatView extends ItemView {
     // if (last) last.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
-  appendMessage(msg: ChatMessage) {
+  appendMessage(msg: ChatMessage, isPending: boolean = false) {
+    let dom: HTMLElement | undefined;
     if (msg.role === 'user') {
+      // renderUserMessage returns promise<HTMLElement>
+      // We need to handle this async or just let it float?
+      // Typescript might complain about void return.
+      // Ideally renderUserMessage shouldn't be async if possible, or we await.
+      // But appendMessage is sync called.
+      // Let's ignore the promise for now or fire-and-forget, but for Pulse we need the DOM.
+      // MessageRenderer.renderAIMessage returns Promise<HTMLElement> (contentContainer).
+      // We need the parent block.
+
       this.messageRenderer.renderUserMessage(msg, this.plugin.settings.profilePictureUser);
     } else {
-      this.messageRenderer.renderAIMessage(msg, this.plugin.settings.profilePictureAI);
+      this.messageRenderer.renderAIMessage(msg, this.plugin.settings.profilePictureAI).then(content => {
+        if (isPending && content.parentElement) {
+          content.parentElement.addClass('pending-generation');
+        }
+      });
     }
   }
+
 
 
   async onSendMessage() {
