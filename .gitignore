@@ -3,3 +3,4 @@ main.js
 .DS_Store
 .obsidian
 data.json
+.direnv/
