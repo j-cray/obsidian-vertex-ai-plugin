@@ -4,7 +4,8 @@ import { ChatResponse, ToolAction } from '../types';
 import { VertexAI } from '@google-cloud/vertexai';
 // @ts-ignore
 import { ModelServiceClient } from '@google-cloud/aiplatform';
-import { getModelDefinition } from '../config/models';
+import { getModelDefinition, PRECACHED_MODELS } from '../config/models';
+
 
 
 
@@ -21,6 +22,8 @@ export class VertexService {
   private modelTemperature: number = 0.5;
   private maxOutputTokens: number = 8192;
   private maxOutputTokensAuto: boolean = true;
+  private autoModelEnabled: boolean = false;
+
 
 
 
@@ -33,7 +36,8 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number, maxOutputTokensAuto?: boolean }) {
+  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number, maxOutputTokensAuto?: boolean, autoModelEnabled?: boolean }) {
+
 
 
     this.serviceAccountJson = settings.serviceAccountJson;
@@ -47,7 +51,9 @@ export class VertexService {
     this.modelTemperature = settings.modelTemperature ?? 0.5;
     this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
     this.maxOutputTokensAuto = settings.maxOutputTokensAuto ?? true;
+    this.autoModelEnabled = !!settings.autoModelEnabled;
     this.vertexClient = null; // Reset client on settings change
+
 
 
   }
@@ -522,16 +528,17 @@ export class VertexService {
     // Threshold
     if (score >= 4) {
       console.log('Mastermind DEBUG: Auto-selection: COMPLEX tier.');
-      return 'gemini-3-pro-preview';
+      // Find best modern Pro model
+      const complexModel = PRECACHED_MODELS.find(m => m.id.includes('pro') && m.isModern)?.id || 'gemini-3-pro-preview';
+      return complexModel;
     }
 
     // Default to Simple
     console.log('Mastermind DEBUG: Auto-selection: SIMPLE tier.');
+    // Find best modern Flash model
+    const simpleModel = PRECACHED_MODELS.find(m => m.id.includes('flash') && m.isModern)?.id || 'gemini-3-flash';
+    return simpleModel;
 
-    // Prefer 2.5 Flash if we think it's available (it's new), else 2.0 Flash
-    // We can just return the ID, and if it fails, the user will see.
-    // But better to be safe? No, let's trust the defaults we planned.
-    return 'gemini-2.5-flash';
   }
 
   async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], userProfile: string = '', toolRegistry?: any, signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
@@ -542,15 +549,12 @@ export class VertexService {
     const location = this.location || 'us-central1';
 
     // Auto-Model Selection
-    if (modelId === 'auto') {
+    if (this.autoModelEnabled) {
       const selected = this.selectModel(prompt, images);
-      // Verify fallbacks if specific models aren't available?
-      // For now, we assume the user has access to standard models if they use Auto.
-      // We can add a quick check if we had the availableModels list handy, but that's in settings.
-      // Basic fallback logic for safety:
-      // If we picked a preview model, we might want to ensure it works, but let's try it.
+      console.log(`Mastermind: Auto-switched model to ${selected}`);
       modelId = selected;
     }
+
 
     try {
       const client = this.getVertexClient();
