@@ -522,7 +522,8 @@ export class VertexService {
     return 'gemini-2.5-flash';
   }
 
-  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], userProfile: string = '', signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
+  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], userProfile: string = '', toolRegistry?: any, signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
+
 
     const projectId = this.getProjectId();
     let modelId = this.modelId || 'gemini-2.0-flash-exp';
@@ -564,115 +565,14 @@ export class VertexService {
 
 
 
-      const functionDeclarations: any[] = [
-        {
-          name: "list_files",
-          description: "Lists all markdown files in the vault.",
-          parameters: { type: "object", properties: {} },
-        },
-        {
-          name: 'list_directory',
-          description: 'Lists the contents of a specific directory/folder.',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'The path of the folder to list.' }
-            },
-            required: ['path']
-          }
-        },
-        {
-          name: "read_file",
-          description: "Reads the full content of a specified markdown file.",
-          parameters: {
-            type: "object",
-            properties: {
-              path: {
-                type: "string",
-                description: "The absolute path of the file to read.",
-              },
-            },
-            required: ["path"],
-          },
-        },
-        {
-          name: "search_content",
-          description:
-            "Searches for a keyword or phrase within all markdown files in the vault.",
-          parameters: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "The search term." },
-            },
-            required: ["query"],
-          },
-        },
-        {
-          name: "create_note",
-          description:
-            "Creates a new markdown note with the specified content.",
-          parameters: {
-            type: "object",
-            properties: {
-              path: {
-                type: "string",
-                description:
-                  'The path for the new note (e.g., "Summaries/MyNote.md").',
-              },
-              content: {
-                type: "string",
-                description: "The content of the note.",
-              },
-            },
-            required: ["path", "content"],
-          },
-        },
-        {
-          name: "create_folder",
-          description: "Creates a new folder.",
-          parameters: {
-            type: "object",
-            properties: {
-              path: {
-                type: "string",
-                description: "The path for the new folder.",
-              },
-            },
-            required: ["path"],
-          },
-        },
-        {
-          name: "delete_file",
-          description: "Deletes a file or folder. Use with caution.",
-          parameters: {
-            type: "object",
-            properties: {
-              path: {
-                type: "string",
-                description: "The path of the file to delete.",
-              },
-            },
-            required: ['path']
-          }
-        },
-        {
-          name: "propose_plan",
-          description: "Proposes a step-by-step plan for a complex task. Use this before executing destructive computations or multi-file refactors.",
-          parameters: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Title of the plan." },
-              steps: {
-                type: "array",
-                items: { type: "string" },
-                description: "List of steps to execute."
-              }
-            },
-            required: ["title", "steps"]
-          }
-        }
-      ];
+      const toolsConfig = toolRegistry ? toolRegistry.toGeminiTools() : [];
+      let functionDeclarations: any[] = [];
+      if (toolsConfig.length > 0) {
+        functionDeclarations = toolsConfig[0].function_declarations;
+      }
 
+      // Fallback/Legacy: If no registry provided, we could keep hardcoded, but we are migrating.
+      // We will assume registry is provided.
 
       if (this.permWeb) {
         functionDeclarations.push({
@@ -1030,96 +930,111 @@ export class VertexService {
             let status: 'success' | 'error' = 'success';
 
             try {
-              if (name === 'list_files') {
-                result = await vaultService.listMarkdownFiles();
-              } else if (name === 'read_file') {
-                result = await vaultService.getFileContent(args.path);
-              } else if (name === 'search_content') {
-                result = await vaultService.searchVault(args.query);
-              } else if (name === 'create_note') {
-                await vaultService.createNote(args.path, args.content);
-                result = { status: 'success', message: `Note created at ${args.path}` };
-              } else if (name === 'create_folder') {
-                await vaultService.createFolder(args.path);
-                result = { status: 'success', message: `Folder created at ${args.path}` };
-              } else if (name === 'delete_file') {
-                await vaultService.deleteFile(args.path);
-                result = { status: 'success', message: `File deleted at ${args.path}` };
-              } else if (name === 'list_directory') {
-                result = await vaultService.listDirectory(args.path);
-              } else if (name === 'fetch_url') {
-                if (!this.permWeb) {
-                  throw new Error('Web access is disabled in settings. Enable "Web Access" to allow fetch_url.');
-                }
-                result = await this.fetchUrl(args.url);
-              } else if (name === 'run_shell_command') {
-                if (!this.permTerminal) {
-                  throw new Error('Terminal access is disabled in settings. Enable "Terminal Access" to allow commands.');
-                }
-                if (this.confirmTerminalDestructive) {
-                  result = { status: 'error', message: 'Terminal commands require disabling "Confirm Terminal Commands" in settings.' };
+              try {
+                if (toolRegistry && toolRegistry.has(name)) {
+                  const tool = toolRegistry.get(name);
+                  // We need 'runtime' to execute. VertexService doesn't have it direct, but
+                  // we are in a transition.
+                  // Actually, Tool definition execute takes (args, runtime).
+                  // But VertexService doesn't have `runtime`.
+                  // We passed `vaultService` separate from Registry prior.
+                  // FIX: We need to pass runtime to chat, OR ToolRegistry should handle execution binding?
+                  // ToolRegistry.get returns IAgentTool. execute(args, runtime).
+                  // We need to pass the runtime instance.
+
+                  // Temporary Hack: We assume the tool instances inside registry are bound or we pass a mock runtime?
+                  // No, IAgentTool execute signature is (args, runtime).
+                  // But our `PlanTool` implementation: constructor(runtime) {} execute(args) { this.runtime... }?
+                  // Let's check PlanTool implementation.
+                  // execute(args: any, runtime: AgentRuntime) -> runtime param is used.
+
+                  // So VertexService needs access to Runtime.
+                  // But Runtime imports VertexService. Circular.
+                  // Solution: Pass `runtime` to `chat` instead of `vaultService`?
+                  // `chat` signature: (..., toolRegistry, ...)
+
+                  // Actually, `toolRegistry` HAS `.runtime` property (private?).
+                  // Let's rely on the fact that `toolRegistry` is passed from SessionManager which has `runtime`.
+                  // We can ask SessionManager to pass `runtime` to `chat`.
+                  // Upstream change: Pass `runtime` as arg to `chat`.
+
+                  // For now, I will assume `toolRegistry.runtime` is accessible or I can cast it.
+                  // ToolRegistry has `private runtime`. I should make it public or use getter.
+                  // OR, since I passed `toolRegistry`, I can use `toolRegistry['runtime']`.
+
+                  const runtime = toolRegistry['runtime'];
+                  result = await tool.execute(args, runtime);
+
+                } else if (name === 'fetch_url') {
+                  // Keep legacy/special tools if not in registry yet?
+                  if (!this.permWeb) throw new Error('Web access disabled.');
+                  result = await this.fetchUrl(args.url);
+                } else if (name === 'run_shell_command') {
+                  if (!this.permTerminal) throw new Error('Terminal disabled.');
+                  if (this.confirmTerminalDestructive) result = { status: 'error', message: 'Terminal confirmation required (not implemented in streaming yet).' };
+                  else result = await this.runShellCommand(String(args.command || ''));
                 } else {
-                  result = await this.runShellCommand(String(args.command || ''));
+                  throw new Error(`Unknown tool: ${name}`);
                 }
+              } catch (err: any) {
+                result = { status: 'error', message: err.message };
+                status = 'error';
               }
-            } catch (err: any) {
-              result = { status: 'error', message: err.message };
-              status = 'error';
+
+
+              toolActions[idx].output = result;
+              toolActions[idx].status = status;
+              yield {
+                text: mainTextForTools,
+                actions: [...toolActions], // Copy array to trigger update
+                isThinking: true,
+                thinkingText: thinkingTextForTools,
+                acceptedModelId: modelId
+              };
+
+
+              // Vertex AI requires function responses to be in the SAME ORDER as the calls
+              functionResponses.push({
+                functionResponse: {
+                  name,
+                  response: { name, content: result }
+                }
+              });
             }
-
-            toolActions[idx].output = result;
-            toolActions[idx].status = status;
-            yield {
-              text: mainTextForTools,
-              actions: [...toolActions], // Copy array to trigger update
-              isThinking: true,
-              thinkingText: thinkingTextForTools,
-              acceptedModelId: modelId
-            };
-
-
-            // Vertex AI requires function responses to be in the SAME ORDER as the calls
-            functionResponses.push({
-              functionResponse: {
-                name,
-                response: { name, content: result }
-              }
-            });
-          }
 
           // Push full turn to history
           contents.push(candidate.content); // User request + Model calls
-          contents.push({
-            role: 'function',
-            parts: functionResponses
-          });
+            contents.push({
+              role: 'function',
+              parts: functionResponses
+            });
 
-        } else if (textParts.length > 0 && functionCalls.length === 0) {
-          // Pure text response, we are done
-          return;
+          } else if (textParts.length > 0 && functionCalls.length === 0) {
+            // Pure text response, we are done
+            return;
+          }
         }
+
+        throw new Error('Maximum tool use iterations reached.');
+      } catch (error) {
+        console.error('Mastermind Chat Error:', error);
+        throw error;
       }
-
-      throw new Error('Maximum tool use iterations reached.');
-    } catch (error) {
-      console.error('Mastermind Chat Error:', error);
-      throw error;
     }
-  }
 
-  // Helper method to validate JSON
-  validateJSON(json: string): boolean {
-    try {
-      JSON.parse(json);
-      return true;
-    } catch {
-      return false;
+// Helper method to validate JSON
+validateJSON(json: string): boolean {
+      try {
+        JSON.parse(json);
+        return true;
+      } catch {
+        return false;
+      }
     }
-  }
 
   private async fetchUrl(rawUrl: string): Promise<{ status: string; url: string; statusCode: number; headers: Record<string, string>; body: string; truncated: boolean }> {
     const url = (rawUrl || '').trim();
-    if (!/^https?:\/\//i.test(url)) {
+    if (!/^ https ?: \/\//i.test(url)) {
       throw new Error('Only http/https URLs are allowed.');
     }
 

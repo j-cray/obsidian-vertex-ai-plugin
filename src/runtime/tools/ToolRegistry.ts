@@ -3,7 +3,8 @@ import { AgentRuntime } from '../Runtime';
 
 export class ToolRegistry {
   private tools: Map<string, IAgentTool> = new Map();
-  private runtime: AgentRuntime;
+  public runtime: AgentRuntime;
+
 
   constructor(runtime: AgentRuntime) {
     this.runtime = runtime;

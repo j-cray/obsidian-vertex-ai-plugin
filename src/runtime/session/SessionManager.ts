@@ -146,7 +146,8 @@ export class SessionManager {
         // Ignore if profile doesn't exist
       }
 
-      for await (const chunk of this.runtime.vertex.chat(text, context, this.runtime.vault, history, images, userProfile, signal)) {
+      for await (const chunk of this.runtime.vertex.chat(text, context, this.runtime.vault, history, images, userProfile, this.runtime.tools, signal)) {
+
         if (signal?.aborted) break;
 
 
