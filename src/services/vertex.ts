@@ -5,8 +5,8 @@ import { VertexAI } from '@google-cloud/vertexai';
 // @ts-ignore
 import { ModelServiceClient } from '@google-cloud/aiplatform';
 import { getModelDefinition, PRECACHED_MODELS } from '../config/models';
-import { ModelRouter } from '../ai/ModelRouter';
-import { ToolRouter } from '../ai/ToolRouter';
+import { Router } from '../ai/Router';
+
 
 
 
@@ -490,10 +490,11 @@ export class VertexService {
 
     // Auto-Model Selection
     if (this.autoModelEnabled) {
-      const selected = ModelRouter.selectModel(prompt, images.length);
+      const selected = Router.selectModel(prompt, images.length);
       console.log(`Mastermind: Auto-switched model to ${selected}`);
       modelId = selected;
     }
+
 
 
 

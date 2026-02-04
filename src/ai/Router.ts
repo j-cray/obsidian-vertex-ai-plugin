@@ -1,12 +1,18 @@
 import { PRECACHED_MODELS } from '../config/models';
 
-export class ModelRouter {
+export interface ToolContext {
+  permWeb: boolean;
+  permTerminal: boolean;
+  confirmTerminalDestructive: boolean;
+  fetchUrl: (url: string) => Promise<any>;
+  runShellCommand: (cmd: string) => Promise<any>;
+}
+
+export class Router {
 
   /**
-   * Selects the optimal model based on prompt complexity and available models.
-   * @param prompt User's input text
-   * @param imageCount Number of images attached
-   * @returns The Model ID to use (e.g., 'gemini-3-pro-preview')
+   * Intelligently selects the best model for the given task.
+   * Handles multimodal inputs, image generation intent, and complexity scoring.
    */
   static selectModel(prompt: string, imageCount: number = 0): string {
     const p = prompt.toLowerCase();
@@ -30,6 +36,37 @@ export class ModelRouter {
 
     return this.getBestFlashModel();
   }
+
+  /**
+   * Routes tool execution to the appropriate handler (Registry or Native).
+   */
+  static async executeTool(name: string, args: any, registry: any, context: ToolContext): Promise<any> {
+
+    // 1. Registry Tools (Priority)
+    if (registry && registry.has(name)) {
+      const tool = registry.get(name);
+      return await tool.execute(args, registry.runtime);
+    }
+
+    // 2. Native / Legacy Tools
+    switch (name) {
+      case 'fetch_url':
+        if (!context.permWeb) throw new Error('Web access disabled.');
+        return await context.fetchUrl(args.url);
+
+      case 'run_shell_command':
+        if (!context.permTerminal) throw new Error('Terminal disabled.');
+        if (context.confirmTerminalDestructive) {
+          return { status: 'error', message: 'Terminal confirmation required (not implemented in streaming yet).' };
+        }
+        return await context.runShellCommand(String(args.command || ''));
+
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  }
+
+  // --- Internal Heuristics ---
 
   private static detectImageGeneration(prompt: string): boolean {
     const regex = /(?:generate|create|make|draw).*(?:image|picture|photo|sketch|diagram)/i;
@@ -62,8 +99,6 @@ export class ModelRouter {
   }
 
   private static getBestProModel(): string {
-    // Priority: Gemini 3 Pro -> 2.5 Pro -> 2.0 Pro -> 1.5 Pro
-    // We filter by 'isModern' for the top tier recommendations
     const best = PRECACHED_MODELS.find(m => m.id.includes('pro') && m.isModern);
     return best ? best.id : 'gemini-3-pro-preview';
   }
