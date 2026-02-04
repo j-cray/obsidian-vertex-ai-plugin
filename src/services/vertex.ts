@@ -770,26 +770,51 @@ export class VertexService {
           requestConfig.systemInstruction = systemInstructionText;
         }
 
-        const response = await this.retryWithBackoff(async () => {
-          return await generativeModel.generateContent(requestConfig);
-        });
+        let candidate;
+        let finishReason;
 
-        const result = response.response;
+        // --- RETRY LOOP FOR MALFORMED CALLS ---
+        let attempt = 0;
+        const maxAttempts = 3;
 
-        if (!result.candidates || result.candidates.length === 0) {
-          const blockReason = result.promptFeedback?.blockReason;
-          const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
-          throw new Error(`No candidates returned from Vertex AI. Finish Reason: ${result.candidates?.[0]?.finishReason || 'NONE'}${blockReason ? ` | Blocked: ${blockReason}` : ''}${usage}`);
+        while (attempt < maxAttempts) {
+          attempt++;
+          const response = await this.retryWithBackoff(async () => {
+            return await generativeModel.generateContent(requestConfig);
+          });
+
+          const result = response.response;
+
+          if (!result.candidates || result.candidates.length === 0) {
+            // ... error handling for no candidates ...
+            const blockReason = result.promptFeedback?.blockReason;
+            const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
+            throw new Error(`No candidates returned. Reason: ${result.candidates?.[0]?.finishReason || 'NONE'}${blockReason ? ` | Blocked: ${blockReason}` : ''}${usage}`);
+          }
+
+          candidate = result.candidates[0];
+          finishReason = candidate.finishReason;
+
+          // Check specifically for MALFORMED_FUNCTION_CALL to retry
+          if ((finishReason as any) === 'MALFORMED_FUNCTION_CALL') {
+            console.warn(`Mastermind: Malformed Function Call defined (Attempt ${attempt}/${maxAttempts}). Retrying...`);
+            if (attempt < maxAttempts) {
+              continue; // Loop again
+            }
+            // If we ran out of attempts, fall through to error handling
+          } else {
+            break; // Valid response (or other error), break loop
+          }
         }
+        // ------------------------------------------
 
-        const candidate = result.candidates[0];
-        const finishReason = candidate.finishReason;
-
-        if (finishReason === 'SAFETY') {
+        if ((finishReason as any) === 'SAFETY') {
           throw new Error('Response blocked due to safety settings.');
         }
 
-        if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        if (!candidate || !candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+          // ... empty check ...
+
           const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
           const feedback = result.promptFeedback?.blockReason ? ` | Feedback: ${result.promptFeedback.blockReason}` : '';
 
@@ -804,6 +829,9 @@ export class VertexService {
           }
 
           if ((finishReason as any) === 'MALFORMED_FUNCTION_CALL') {
+            // If we are here, we exhausted our retries.
+            // Fallback to error message.
+
             // Basic Auto-Correction: Retry once with a nudge
             // We can't strictly retry *this* generation request easily without recursive complexity or modifying 'contents'.
             // Instead, we will throw a specific error that the outer loop *could* handle, or just try to continue if we can.
