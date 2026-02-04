@@ -3,6 +3,8 @@ import MastermindPlugin from '../main';
 import { MessageRenderer } from './MessageRenderer';
 import { AgentRuntime } from '../runtime/Runtime';
 import { ChatMessage } from '../types';
+import { HistoryModal } from './HistoryModal';
+
 
 export const VIEW_TYPE_MASTERMIND = 'mastermind-chat-view';
 
@@ -104,11 +106,11 @@ export class MastermindChatView extends ItemView {
     // HISTORY (Placeholder/Info)
     const historyBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>`;
-    historyBtn.title = "History Info";
+    historyBtn.title = "Conversation History";
     historyBtn.onclick = () => {
-      const count = this.runtime.session.messages.get()?.length || 0;
-      new Notice(`Current session has ${count} messages.`);
+      new HistoryModal(this.app, this.plugin).open();
     };
+
 
     // SETTINGS
     const settingsBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });

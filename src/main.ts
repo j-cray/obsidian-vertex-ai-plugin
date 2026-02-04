@@ -20,7 +20,10 @@ interface MastermindSettings {
   history: any[];
   // Memory
   userProfilePath: string;
+  saveConversationHistory: boolean;
+  savePlans: boolean;
   // Permissions
+
   permVaultRead: boolean;
 
   permVaultWrite: boolean;
@@ -51,7 +54,10 @@ const DEFAULT_SETTINGS: MastermindSettings = {
   modelId: 'gemini-2.0-flash-exp',
   history: [],
   userProfilePath: 'Mastermind/User Profile.md',
+  saveConversationHistory: true,
+  savePlans: true,
   permVaultRead: true,
+
 
   permVaultWrite: true,
   permVaultDelete: false,
@@ -119,9 +125,9 @@ When the user explicitly requests you to BUILD, IMPLEMENT, CREATE, or EXECUTE a 
 - Long-term tracking of progress
 
 THEN create planning artifacts in Mastermind/Plans/:
-- Implementation plan: Mastermind/Plans/<slug>.md with goals, steps, dependencies
-- Checklist: Mastermind/Plans/<slug>-checklist.md with actionable checkboxes
-- Summary (after completion): Mastermind/Plans/<slug>-summary.md with outcomes and decisions
+- Implementation plan: Mastermind/Plans/YYYY-MM-DD-keywords-plan.md
+- Checklist: Mastermind/Plans/YYYY-MM-DD-keywords-checklist.md
+- Summary: Mastermind/Plans/YYYY-MM-DD-keywords-summary.md
 
 DO NOT create planning artifacts for:
 - Simple questions or information requests
@@ -764,7 +770,29 @@ class MastermindSettingTab extends PluginSettingTab {
           this.plugin.settings.userProfilePath = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName('Save Conversation History')
+      .setDesc('Automatically save every conversation to Mastermind/History/.')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.saveConversationHistory)
+        .onChange(async (value) => {
+          this.plugin.settings.saveConversationHistory = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Save Plans')
+      .setDesc('Automatically save planning artifacts to Mastermind/Plans/.')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.savePlans)
+        .onChange(async (value) => {
+          this.plugin.settings.savePlans = value;
+          await this.plugin.saveSettings();
+        }));
+
   }
+
 
 }
 

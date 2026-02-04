@@ -11,6 +11,9 @@ export class SessionManager {
   /** Reactive store for "is thinking/generating" state */
   public isGenerating: Writable<boolean> = writable(false);
 
+  private currentSessionFile: string | null = null;
+
+
   constructor(runtime: AgentRuntime) {
     this.runtime = runtime;
     this.loadHistory();
@@ -41,7 +44,16 @@ export class SessionManager {
   public clearHistory() {
     this.messages.set([]);
     this.persist([]);
+    this.currentSessionFile = null; // Reset session file on clear
   }
+
+  public loadSession(messages: ChatMessage[], filename: string) {
+    this.messages.set(messages);
+    this.persist(messages);
+    this.currentSessionFile = filename;
+  }
+
+
 
   /**
    * Save to plugin settings
@@ -167,7 +179,13 @@ export class SessionManager {
           this.persist(msgs);
           return msgs;
         });
+
+        // Auto-save to History (if enabled)
+        if (this.runtime.plugin.settings.saveConversationHistory) {
+          await this.saveSessionToVault(this.messages.get());
+        }
       }
+
 
       this.runtime.bus.trigger('agent:action:end', { text: finalText, actions: finalActions });
 
@@ -184,4 +202,34 @@ export class SessionManager {
       this.setGenerating(false);
     }
   }
+
+  private async saveSessionToVault(history: ChatMessage[]) {
+    if (history.length === 0) return;
+
+    // Generate filename if needed
+    if (!this.currentSessionFile) {
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+
+      // Extract keywords from first user message
+      const firstUserMsg = history.find(m => m.role === 'user');
+      let keywords = 'conversation';
+      if (firstUserMsg && firstUserMsg.parts[0].text) {
+        const text = firstUserMsg.parts[0].text;
+        // distinct words provided by user, simple heuristic
+        const words = text.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+        keywords = words.slice(0, 4).join('-').toLowerCase();
+      }
+
+      this.currentSessionFile = `${dateStr}-${timeStr}-${keywords}`;
+    }
+
+    try {
+      await this.runtime.vault.writeHistory(history, this.currentSessionFile);
+    } catch (e) {
+      console.error('Mastermind: Failed to save history', e);
+    }
+  }
 }
+

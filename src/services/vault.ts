@@ -250,6 +250,43 @@ export class VaultService {
     return filename.replace('.md', ''); // Return ID for persistence
   }
 
+  async parseHistoryNote(content: string): Promise<{ role: string, parts: any[] }[]> {
+    const lines = content.split('\n');
+    const messages: { role: string, parts: any[] }[] = [];
+    let currentRole = '';
+    let currentText = '';
+
+    const pushMessage = () => {
+      if (currentRole && currentText.trim()) {
+        messages.push({
+          role: currentRole === 'User' ? 'user' : 'model',
+          parts: [{ text: currentText.trim() }]
+        });
+      }
+      currentText = '';
+    };
+
+    for (const line of lines) {
+      if (line.startsWith('> **User**')) {
+        pushMessage();
+        currentRole = 'User';
+      } else if (line.startsWith('> **Mastermind**')) {
+        pushMessage();
+        currentRole = 'Mastermind';
+      } else if (line.startsWith('*Auto-saved at')) {
+        // Footer, ignore
+      } else if (line.startsWith('# Mastermind Conversation')) {
+        // Header, ignore
+      } else {
+        // Content
+        currentText += line + '\n';
+      }
+    }
+    pushMessage(); // Push last
+    return messages;
+  }
+
+
   async listFolder(path: string): Promise<string[]> {
     const folder = this.app.vault.getAbstractFileByPath(path);
     if (!folder || !(folder as any).children) {
