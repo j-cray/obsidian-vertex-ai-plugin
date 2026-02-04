@@ -48,6 +48,17 @@ export class MessageRenderer {
 
     const thinkingContent = thinkingContainer.createDiv('thinking-content');
 
+    // Toggle Collapse
+    thinkingHeader.addClass('clickable-icon');
+    thinkingHeader.onclick = () => {
+      if (thinkingContent.classList.contains('collapsed')) {
+        thinkingContent.removeClass('collapsed');
+      } else {
+        thinkingContent.addClass('collapsed');
+      }
+    };
+
+
     if (msg.thinking) {
       thinkingContainer.style.display = 'block';
       thinkingContent.innerText = msg.thinking;
@@ -107,7 +118,19 @@ export class MessageRenderer {
       thinkingContainer.createDiv('thinking-content');
     }
 
-    const thinkingContent = thinkingContainer.querySelector('.thinking-content') as HTMLElement;
+    let thinkingContent = thinkingContainer.querySelector('.thinking-content') as HTMLElement;
+    if (!thinkingContent) {
+      thinkingContent = thinkingContainer.createDiv('thinking-content');
+      // Add toggle if recreated
+      const header = thinkingContainer.querySelector('.thinking-header') as HTMLElement;
+      if (header) {
+        header.addClass('clickable-icon');
+        header.onclick = () => {
+          thinkingContent.toggleClass('collapsed');
+        };
+      }
+    }
+
 
     if (msg.thinking) {
       thinkingContainer.style.display = 'block';

@@ -262,7 +262,13 @@
     max-height: 200px;
     font-family: var(--font-monospace);
     font-style: italic;
+    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
 }
+
+.thinking-content.collapsed {
+    display: none;
+}
+
 
 /* Finished thinking - dim and collapse */
 .thinking-code-block {

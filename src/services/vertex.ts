@@ -823,22 +823,39 @@ export class VertexService {
         // 1. Handle Text Parts (Thinking or Response)
         if (textParts.length > 0) {
           const fullText = textParts.join('\n');
-          console.log('DEBUG: Full response text:', fullText.substring(0, 200));
+          // console.log('DEBUG: Full response text:', fullText.substring(0, 200));
 
-          const thinkingMatch = fullText.match(/```thinking\n([\s\S]*?)\n```/);
-          if (thinkingMatch) {
-            const thinkingText = thinkingMatch[1].trim();
+          // Regex for CLOSED thinking block
+          const closedThinkingMatch = fullText.match(/```thinking\n([\s\S]*?)\n```/);
+
+          // Regex for OPEN (streaming) thinking block - matches at end of string
+          const openThinkingMatch = fullText.match(/```thinking\n([\s\S]*)$/);
+
+          if (closedThinkingMatch) {
+            const thinkingText = closedThinkingMatch[1].trim();
             const mainText = fullText.replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim();
 
             yield {
               text: mainText,
               actions: [],
-              isThinking: true,
+              isThinking: false, // Finished thinking
+              thinkingText: thinkingText,
+              acceptedModelId: modelId
+            };
+          } else if (openThinkingMatch) {
+            // Streaming case: We have an open block
+            const thinkingText = openThinkingMatch[1].trim();
+            const mainText = fullText.substring(0, openThinkingMatch.index).trim();
+
+            yield {
+              text: mainText,
+              actions: [],
+              isThinking: true, // Still thinking
               thinkingText: thinkingText,
               acceptedModelId: modelId
             };
           } else {
-            // If there are tools, the text is a preamble.
+            // Normal text (or preamble before thinking starts)
             yield {
               text: fullText,
               actions: [],
@@ -846,6 +863,7 @@ export class VertexService {
             };
           }
         }
+
 
         // 2. Handle Function Calls (Parallel)
         if (functionCalls.length > 0) {
