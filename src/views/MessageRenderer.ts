@@ -126,8 +126,9 @@ export class MessageRenderer {
       if (header) {
         header.addClass('clickable-icon');
         header.onclick = () => {
-          thinkingContent.toggleClass('collapsed');
+          thinkingContent.classList.toggle('collapsed');
         };
+
       }
     }
 
