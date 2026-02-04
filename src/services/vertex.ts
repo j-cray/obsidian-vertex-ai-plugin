@@ -795,12 +795,32 @@ export class VertexService {
           candidate = result.candidates[0];
           finishReason = candidate.finishReason;
 
-          // Check specifically for MALFORMED_FUNCTION_CALL to retry
           if ((finishReason as any) === 'MALFORMED_FUNCTION_CALL') {
             console.warn(`Mastermind: Malformed Function Call defined (Attempt ${attempt}/${maxAttempts}). Retrying...`);
+
+            // Visibility: Explain what happened in a Thinking block
+            // Try to infer tool name if possible (heuristic)
+            let toolHint = 'Unknown Tool';
+            if (candidate.content && candidate.content.parts) {
+              for (const p of candidate.content.parts) {
+                if (p.functionCall) {
+                  toolHint = p.functionCall.name; // Sometimes partial
+                }
+              }
+            }
+
+            yield {
+              text: '', // Don't output final text yet
+              actions: [],
+              isThinking: true,
+              thinkingText: `\n> [System Warning] Attempted to call tool '${toolHint}' but the request was malformed. Making retry attempt ${attempt}/${maxAttempts}...`,
+              acceptedModelId: modelId
+            };
+
             if (attempt < maxAttempts) {
               continue; // Loop again
             }
+
             // If we ran out of attempts, fall through to error handling
           } else {
             break; // Valid response (or other error), break loop
