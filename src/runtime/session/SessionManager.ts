@@ -82,24 +82,37 @@ export class SessionManager {
       const aiMsg: ChatMessage = { role: 'model', parts: [{ text: '' }], actions: [] };
       this.addMessage(aiMsg);
 
-      // Helper to update the last message (the AI one)
+      // Helper to update the last message (the AI one) IMMUTABLY
       const updateLastMessage = (chunk: Partial<ChatMessage>, isThinking = false) => {
         this.messages.update((msgs: ChatMessage[]) => {
-          const last = msgs[msgs.length - 1];
-          if (last.role === 'model') {
-            if (chunk.parts) last.parts = chunk.parts;
-            if (chunk.actions) last.actions = chunk.actions;
-            if (chunk.thinking) last.thinking = chunk.thinking;
-            if (chunk.model) last.model = chunk.model;
+          if (msgs.length === 0) return msgs;
 
-            // Trigger bus events for UI streaming if needed
+          const lastIdx = msgs.length - 1;
+          const last = msgs[lastIdx];
+
+          if (last.role === 'model') {
+            // Create a COPY of the last message
+            const updatedLast = { ...last };
+
+            if (chunk.parts) updatedLast.parts = chunk.parts;
+            if (chunk.actions) updatedLast.actions = chunk.actions;
+            if (chunk.thinking) updatedLast.thinking = chunk.thinking;
+            if (chunk.model) updatedLast.model = chunk.model;
+
+            // Trigger bus events
             if (isThinking) {
               this.runtime.bus.trigger('agent:thinking', chunk.thinking);
             }
+
+            // Return NEW array with NEW message object
+            const newMsgs = [...msgs];
+            newMsgs[lastIdx] = updatedLast;
+            return newMsgs;
           }
           return msgs;
         });
       };
+
 
 
       this.runtime.bus.trigger('agent:action:start', { type: 'chat', prompt: text });
