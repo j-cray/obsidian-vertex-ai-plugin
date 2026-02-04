@@ -11,7 +11,7 @@ export class SessionManager {
   /** Reactive store for "is thinking/generating" state */
   public isGenerating: Writable<boolean> = writable(false);
 
-  public isGenerating: Writable<boolean> = writable(false);
+
 
   private abortController: AbortController | null = null;
 
@@ -77,6 +77,14 @@ export class SessionManager {
   public setGenerating(generating: boolean) {
     this.isGenerating.set(generating);
   }
+
+  public abort() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+  }
+
 
   /**
    * Main entry point for user interaction
