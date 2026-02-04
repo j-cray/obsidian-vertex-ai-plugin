@@ -835,6 +835,8 @@ export class VertexService {
 
         if (!candidate || !candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
           // ... empty check ...
+          if (!result) throw new Error('No result returned from API.');
+
 
           const usage = result.usageMetadata ? ` (Tokens: ${result.usageMetadata.totalTokenCount})` : '';
           const feedback = result.promptFeedback?.blockReason ? ` | Feedback: ${result.promptFeedback.blockReason}` : '';
