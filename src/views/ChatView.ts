@@ -171,10 +171,9 @@ export class MastermindChatView extends ItemView {
     sendButton.addEventListener('click', () => {
       // TODO: Handle stop interaction
       if (this.runtime.session.isGenerating.get()) {
-        // No easy way to abort via SessionManager yet without exposing AbortController
-        // For now, we just don't support explicit stop in UI phase 1 unless we add abort to SessionManager
-        new Notice("Stopping not fully implemented in Phase 1 runtime.");
+        this.runtime.session.abort();
       } else {
+
         this.onSendMessage();
       }
     });

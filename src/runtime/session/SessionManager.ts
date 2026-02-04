@@ -11,7 +11,12 @@ export class SessionManager {
   /** Reactive store for "is thinking/generating" state */
   public isGenerating: Writable<boolean> = writable(false);
 
+  public isGenerating: Writable<boolean> = writable(false);
+
+  private abortController: AbortController | null = null;
+
   private currentSessionFile: string | null = null;
+
 
 
   constructor(runtime: AgentRuntime) {
@@ -76,8 +81,17 @@ export class SessionManager {
   /**
    * Main entry point for user interaction
    */
-  public async sendMessage(text: string, signal?: AbortSignal) {
+  public async sendMessage(text: string, externalSignal?: AbortSignal) {
     if (!text.trim()) return;
+
+    // Cancel previous if any (though UI blocks this usually)
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.abortController = new AbortController();
+    const signal = externalSignal || this.abortController.signal;
+
+
 
     this.setGenerating(true);
 
@@ -201,7 +215,10 @@ export class SessionManager {
       });
     } finally {
       this.setGenerating(false);
+      this.abortController = null;
     }
+
+
   }
 
   private async saveSessionToVault(history: ChatMessage[]) {
