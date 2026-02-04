@@ -878,12 +878,30 @@ export class VertexService {
               status: 'pending'
             });
           }
+          // Extract thinking text context for tool updates
+          const fullTextForTools = textParts.join('\n');
+          let thinkingTextForTools: string | undefined = undefined;
+          let mainTextForTools = fullTextForTools;
+
+          const closedMatch = fullTextForTools.match(/```thinking\n([\s\S]*?)\n```/);
+          const openMatch = fullTextForTools.match(/```thinking\n([\s\S]*)$/);
+
+          if (closedMatch) {
+            thinkingTextForTools = closedMatch[1].trim();
+            mainTextForTools = fullTextForTools.replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim();
+          } else if (openMatch) {
+            thinkingTextForTools = openMatch[1].trim();
+            mainTextForTools = fullTextForTools.substring(0, openMatch.index).trim();
+          }
+
           yield {
-            text: textParts.join('\n').replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim(), // Show text alongside tool status
+            text: mainTextForTools,
             actions: toolActions,
             isThinking: true,
+            thinkingText: thinkingTextForTools,
             acceptedModelId: modelId
           };
+
 
           // Execute calls
           for (let idx = 0; idx < functionCalls.length; idx++) {
@@ -961,10 +979,13 @@ export class VertexService {
             toolActions[idx].output = result;
             toolActions[idx].status = status;
             yield {
-              text: textParts.join('\n').replace(/```thinking\n[\s\S]*?\n```\n?/, '').trim(),
+              text: mainTextForTools,
               actions: [...toolActions], // Copy array to trigger update
-              isThinking: true
+              isThinking: true,
+              thinkingText: thinkingTextForTools,
+              acceptedModelId: modelId
             };
+
 
             // Vertex AI requires function responses to be in the SAME ORDER as the calls
             functionResponses.push({
