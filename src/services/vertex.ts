@@ -17,6 +17,8 @@ export class VertexService {
   private permTerminal: boolean = false;
   private confirmTerminalDestructive: boolean = true;
   private modelTemperature: number = 0.5;
+  private maxOutputTokens: number = 8192;
+
 
   private getApiHost(location: string): string {
     const loc = location || 'us-central1';
@@ -27,7 +29,8 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number }) {
+  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number }) {
+
     this.serviceAccountJson = settings.serviceAccountJson;
     this.aiStudioKey = settings.aiStudioKey || '';
     this.location = settings.location;
@@ -37,7 +40,9 @@ export class VertexService {
     this.permTerminal = !!settings.permTerminal;
     this.confirmTerminalDestructive = settings.confirmTerminalDestructive ?? true;
     this.modelTemperature = settings.modelTemperature ?? 0.5;
+    this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
     this.vertexClient = null; // Reset client on settings change
+
   }
 
   private getVertexClient(): VertexAI {
@@ -657,8 +662,9 @@ export class VertexService {
 
         const generationConfig = {
           temperature: this.modelTemperature,
-          maxOutputTokens: 2048,
+          maxOutputTokens: this.maxOutputTokens,
         };
+
 
         const requestConfig: any = {
           contents,
