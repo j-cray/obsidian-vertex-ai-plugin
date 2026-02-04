@@ -930,107 +930,77 @@ export class VertexService {
             let status: 'success' | 'error' = 'success';
 
             try {
-              try {
-                if (toolRegistry && toolRegistry.has(name)) {
-                  const tool = toolRegistry.get(name);
-                  // We need 'runtime' to execute. VertexService doesn't have it direct, but
-                  // we are in a transition.
-                  // Actually, Tool definition execute takes (args, runtime).
-                  // But VertexService doesn't have `runtime`.
-                  // We passed `vaultService` separate from Registry prior.
-                  // FIX: We need to pass runtime to chat, OR ToolRegistry should handle execution binding?
-                  // ToolRegistry.get returns IAgentTool. execute(args, runtime).
-                  // We need to pass the runtime instance.
+              if (toolRegistry && toolRegistry.has(name)) {
+                const tool = toolRegistry.get(name);
+                // Use the public runtime property from ToolRegistry
+                const runtime = toolRegistry.runtime;
+                result = await tool.execute(args, runtime);
 
-                  // Temporary Hack: We assume the tool instances inside registry are bound or we pass a mock runtime?
-                  // No, IAgentTool execute signature is (args, runtime).
-                  // But our `PlanTool` implementation: constructor(runtime) {} execute(args) { this.runtime... }?
-                  // Let's check PlanTool implementation.
-                  // execute(args: any, runtime: AgentRuntime) -> runtime param is used.
-
-                  // So VertexService needs access to Runtime.
-                  // But Runtime imports VertexService. Circular.
-                  // Solution: Pass `runtime` to `chat` instead of `vaultService`?
-                  // `chat` signature: (..., toolRegistry, ...)
-
-                  // Actually, `toolRegistry` HAS `.runtime` property (private?).
-                  // Let's rely on the fact that `toolRegistry` is passed from SessionManager which has `runtime`.
-                  // We can ask SessionManager to pass `runtime` to `chat`.
-                  // Upstream change: Pass `runtime` as arg to `chat`.
-
-                  // For now, I will assume `toolRegistry.runtime` is accessible or I can cast it.
-                  // ToolRegistry has `private runtime`. I should make it public or use getter.
-                  // OR, since I passed `toolRegistry`, I can use `toolRegistry['runtime']`.
-
-                  const runtime = toolRegistry['runtime'];
-                  result = await tool.execute(args, runtime);
-
-                } else if (name === 'fetch_url') {
-                  // Keep legacy/special tools if not in registry yet?
-                  if (!this.permWeb) throw new Error('Web access disabled.');
-                  result = await this.fetchUrl(args.url);
-                } else if (name === 'run_shell_command') {
-                  if (!this.permTerminal) throw new Error('Terminal disabled.');
-                  if (this.confirmTerminalDestructive) result = { status: 'error', message: 'Terminal confirmation required (not implemented in streaming yet).' };
-                  else result = await this.runShellCommand(String(args.command || ''));
-                } else {
-                  throw new Error(`Unknown tool: ${name}`);
-                }
-              } catch (err: any) {
-                result = { status: 'error', message: err.message };
-                status = 'error';
+              } else if (name === 'fetch_url') {
+                if (!this.permWeb) throw new Error('Web access disabled.');
+                result = await this.fetchUrl(args.url);
+              } else if (name === 'run_shell_command') {
+                if (!this.permTerminal) throw new Error('Terminal disabled.');
+                if (this.confirmTerminalDestructive) result = { status: 'error', message: 'Terminal confirmation required (not implemented in streaming yet).' };
+                else result = await this.runShellCommand(String(args.command || ''));
+              } else {
+                throw new Error(`Unknown tool: ${name}`);
               }
-
-
-              toolActions[idx].output = result;
-              toolActions[idx].status = status;
-              yield {
-                text: mainTextForTools,
-                actions: [...toolActions], // Copy array to trigger update
-                isThinking: true,
-                thinkingText: thinkingTextForTools,
-                acceptedModelId: modelId
-              };
-
-
-              // Vertex AI requires function responses to be in the SAME ORDER as the calls
-              functionResponses.push({
-                functionResponse: {
-                  name,
-                  response: { name, content: result }
-                }
-              });
+            } catch (err: any) {
+              result = { status: 'error', message: err.message };
+              status = 'error';
             }
 
-          // Push full turn to history
-          contents.push(candidate.content); // User request + Model calls
-            contents.push({
-              role: 'function',
-              parts: functionResponses
+            toolActions[idx].output = result;
+            toolActions[idx].status = status;
+            yield {
+              text: mainTextForTools,
+              actions: [...toolActions], // Copy array to trigger update
+              isThinking: true,
+              thinkingText: thinkingTextForTools,
+              acceptedModelId: modelId
+            };
+
+
+            // Vertex AI requires function responses to be in the SAME ORDER as the calls
+            functionResponses.push({
+              functionResponse: {
+                name,
+                response: { name, content: result }
+              }
             });
-
-          } else if (textParts.length > 0 && functionCalls.length === 0) {
-            // Pure text response, we are done
-            return;
           }
+
+          // Push full turn to history
+
+          contents.push(candidate.content); // User request + Model calls
+          contents.push({
+            role: 'function',
+            parts: functionResponses
+          });
+
+        } else if (textParts.length > 0 && functionCalls.length === 0) {
+          // Pure text response, we are done
+          return;
         }
-
-        throw new Error('Maximum tool use iterations reached.');
-      } catch (error) {
-        console.error('Mastermind Chat Error:', error);
-        throw error;
       }
-    }
 
-// Helper method to validate JSON
-validateJSON(json: string): boolean {
-      try {
-        JSON.parse(json);
-        return true;
-      } catch {
-        return false;
-      }
+      throw new Error('Maximum tool use iterations reached.');
+    } catch (error) {
+      console.error('Mastermind Chat Error:', error);
+      throw error;
     }
+  }
+
+  // Helper method to validate JSON
+  validateJSON(json: string): boolean {
+    try {
+      JSON.parse(json);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   private async fetchUrl(rawUrl: string): Promise<{ status: string; url: string; statusCode: number; headers: Record<string, string>; body: string; truncated: boolean }> {
     const url = (rawUrl || '').trim();
