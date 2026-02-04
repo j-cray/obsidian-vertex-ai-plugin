@@ -1,4 +1,5 @@
 import { PRECACHED_MODELS } from '../config/models';
+import { Subagent } from '../types';
 
 export interface ToolContext {
   permWeb: boolean;
@@ -8,33 +9,85 @@ export interface ToolContext {
   runShellCommand: (cmd: string) => Promise<any>;
 }
 
+export interface RoutingDecision {
+  modelId: string;
+  subagent?: Subagent;
+  tokenStrategy: 'efficient' | 'liberal';
+}
+
 export class Router {
 
   /**
-   * Intelligently selects the best model for the given task.
-   * Handles multimodal inputs, image generation intent, and complexity scoring.
+   * Intelligently selects the best model, subagent, and strategy for the task.
    */
-  static selectModel(prompt: string, imageCount: number = 0): string {
+  static plan(prompt: string, images: any[], subagents: Subagent[], efficiencyMode: 'auto' | 'efficient' | 'performance'): RoutingDecision {
+    const p = prompt.toLowerCase();
+    const imageCount = images.length;
+    const complexityScore = this.calculateComplexityScore(p);
+
+    // 1. Determine Subagent
+    const selectedSubagent = this.selectSubagent(p, subagents);
+
+    // 2. Determine Strategy
+    let strategy: 'efficient' | 'liberal' = 'efficient';
+    if (efficiencyMode === 'performance') strategy = 'liberal';
+    else if (efficiencyMode === 'efficient') strategy = 'efficient';
+    else {
+      // Auto
+      if (complexityScore >= 4 || imageCount > 0 || (selectedSubagent && selectedSubagent.preferredModel?.includes('pro'))) {
+        strategy = 'liberal';
+      }
+    }
+
+    // 3. Select Model
+    let modelId = this.selectModel(p, imageCount, complexityScore, strategy, selectedSubagent);
+
+    return {
+      modelId,
+      subagent: selectedSubagent,
+      tokenStrategy: strategy
+    };
+  }
+
+  static selectSubagent(prompt: string, subagents: Subagent[]): Subagent | undefined {
+    if (!subagents || subagents.length === 0) return undefined;
+
+    // Simple keyword matching for now.
+    for (const agent of subagents) {
+      if (agent.triggers.some(trigger => prompt.includes(trigger.toLowerCase()))) {
+        return agent;
+      }
+    }
+    return undefined;
+  }
+
+  static selectModel(prompt: string, imageCount: number, complexityScore: number = 0, strategy: 'efficient' | 'liberal' = 'efficient', subagent?: Subagent): string {
     const p = prompt.toLowerCase();
 
-    // 1. Image Generation Intent
+    // Subagent preference overrides strict complexity
+    if (subagent && subagent.preferredModel) {
+      if (strategy === 'efficient' && subagent.preferredModel.includes('pro')) {
+        return this.getBestFlashModel();
+      }
+      return subagent.preferredModel;
+    }
+
+    // Image Gen Override
     if (this.detectImageGeneration(p)) {
       return 'imagen-3.0-generate-001';
     }
 
-    // 2. Multimodal Input -> High Capability
+    // Multimodal -> Liberal/Pro
     if (imageCount > 0) {
       return this.getBestProModel();
     }
 
-    // 3. Complexity Scoring
-    const score = this.calculateComplexityScore(p);
-
-    if (score >= 4) {
+    // Strategy based
+    if (strategy === 'liberal') {
       return this.getBestProModel();
+    } else {
+      return this.getBestFlashModel();
     }
-
-    return this.getBestFlashModel();
   }
 
   /**

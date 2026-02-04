@@ -27,6 +27,10 @@ export class VertexService {
   private maxOutputTokens: number = 8192;
   private maxOutputTokensAuto: boolean = true;
   private autoModelEnabled: boolean = false;
+  private enableSubagents: boolean = true;
+  private subagents: any[] = []; // Typed as Subagent[] in usage
+  private efficiencyMode: 'auto' | 'efficient' | 'performance' = 'auto';
+
 
 
 
@@ -40,7 +44,8 @@ export class VertexService {
     this.updateSettings(settings);
   }
 
-  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number, maxOutputTokensAuto?: boolean, autoModelEnabled?: boolean }) {
+  updateSettings(settings: { serviceAccountJson: string, aiStudioKey?: string, location: string, modelId: string, customContextPrompt: string, permWeb?: boolean, permTerminal?: boolean, confirmTerminalDestructive?: boolean, modelTemperature?: number, maxOutputTokens?: number, maxOutputTokensAuto?: boolean, autoModelEnabled?: boolean, enableSubagents?: boolean, subagents?: any[], efficiencyMode?: 'auto' | 'efficient' | 'performance' }) {
+
 
 
 
@@ -56,7 +61,11 @@ export class VertexService {
     this.maxOutputTokens = settings.maxOutputTokens ?? 8192;
     this.maxOutputTokensAuto = settings.maxOutputTokensAuto ?? true;
     this.autoModelEnabled = !!settings.autoModelEnabled;
+    this.enableSubagents = settings.enableSubagents ?? true;
+    this.subagents = settings.subagents || [];
+    this.efficiencyMode = settings.efficiencyMode || 'auto';
     this.vertexClient = null; // Reset client on settings change
+
 
 
 
@@ -488,12 +497,41 @@ export class VertexService {
     let modelId = this.modelId || 'gemini-2.0-flash-exp';
     const location = this.location || 'us-central1';
 
-    // Auto-Model Selection
+
+    // Auto-Model Selection & Routing
     if (this.autoModelEnabled) {
-      const selected = Router.selectModel(prompt, images.length);
-      console.log(`Mastermind: Auto-switched model to ${selected}`);
-      modelId = selected;
+      // Use the Router to plan the execution strategy
+      const decision = Router.plan(
+        prompt,
+        images,
+        this.enableSubagents ? this.subagents : [],
+        this.efficiencyMode
+      );
+
+      console.log(`Mastermind: Router Decision -> Model: ${decision.modelId}, Subagent: ${decision.subagent?.name || 'None'}, Strategy: ${decision.tokenStrategy}`);
+
+      modelId = decision.modelId;
+
+      // Apply Subagent System Prompt Overlay
+      if (decision.subagent) {
+        // Append to custom context or default
+        // "You are Mastermind... \n\n[SUBAGENT OVERRIDE]: You are acting as 'Coding Partner'..."
+        const overlay = `\n\n[ACTING AS: ${decision.subagent.name}]\n${decision.subagent.systemPrompt}`;
+        // We'll inject this when we build systemInstructionText below
+        // Store it temporarily in a way we can access, or just modify 'this.customContextPrompt' ?
+        // No, customContextPrompt is persistent state. We should modify a local variable.
+        // Let's modify the prompt? No, system instruction.
+
+        // Passed to context?
+        // context string in args is usually the vault context.
+        // 'userProfile' is passed.
+
+        // We need to append it to the systemInstructionText which is defined inside the try block.
+        // Let's store it in a local var here.
+        var subagentContext = overlay;
+      }
     }
+
 
 
 
@@ -514,6 +552,12 @@ export class VertexService {
       4. VERIFY: Ensure your actions achieved the goal.
 
       You have access to the user's Obsidian Vault. Prioritize accuracy and preserving user data.`;
+
+      // @ts-ignore
+      if (typeof subagentContext !== 'undefined') {
+        systemInstructionText += subagentContext;
+      }
+
 
 
       // Inject User Profile (Memory) if provided
@@ -914,7 +958,8 @@ export class VertexService {
               //   runShellCommand: this.runShellCommand.bind(this)
               // };
 
-              result = await ToolRouter.routeAndExecute(name, args, toolRegistry, {
+              result = await Router.executeTool(name, args, toolRegistry, {
+
                 permWeb: this.permWeb,
                 permTerminal: this.permTerminal,
                 confirmTerminalDestructive: this.confirmTerminalDestructive,

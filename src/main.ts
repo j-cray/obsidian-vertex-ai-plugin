@@ -10,6 +10,8 @@ import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/ChatView";
 import { VertexService } from "./services/vertex";
 import { AgentRuntime } from "./runtime/Runtime";
 import { PRECACHED_MODELS } from "./config/models";
+import { Subagent } from "./types";
+
 
 
 interface MastermindSettings {
@@ -43,7 +45,12 @@ interface MastermindSettings {
   defaultModel: string;
   availableModels: string[];
   autoModelEnabled: boolean;
+  // Advanced Intelligence
+  enableSubagents: boolean;
+  subagents: Subagent[];
+  efficiencyMode: 'auto' | 'efficient' | 'performance';
   // Generation Params
+
   maxOutputTokens: number;
   maxOutputTokensAuto: boolean;
   temperature: number;
@@ -143,7 +150,26 @@ DO NOT create planning artifacts for:
   defaultModel: 'gemini-2.0-flash-exp',
   availableModels: [],
   autoModelEnabled: false,
+  enableSubagents: true,
+  subagents: [
+    {
+      id: 'coding_partner',
+      name: 'Coding Partner',
+      systemPrompt: 'You are an expert Senior Software Engineer. Prioritize clean, efficient, and typed code. Use comments to explain complex logic.',
+      triggers: ['code', 'refactor', 'function', 'class', 'bug', 'typescript', 'javascript', 'python', 'java', 'react', 'css'],
+      preferredModel: 'gemini-3-pro-preview'
+    },
+    {
+      id: 'writing_partner',
+      name: 'Writing Partner',
+      systemPrompt: 'You are an articulate and creative writer. Focus on flow, tone, and clarity. Avoid jargon unless specified.',
+      triggers: ['write', 'story', 'essay', 'blog', 'article', 'poem', 'revision', 'edit text'],
+      preferredModel: 'gemini-3-pro-preview'
+    }
+  ],
+  efficiencyMode: 'auto',
   maxOutputTokens: 8192,
+
   maxOutputTokensAuto: true,
   temperature: 0.7,
 };

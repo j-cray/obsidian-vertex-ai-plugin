@@ -22,3 +22,12 @@ export interface ChatMessage {
   model?: string;
 }
 
+export interface Subagent {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  triggers: string[]; // Keywords to activate this subagent
+  preferredModel?: string; // Optional override
+}
+
+
