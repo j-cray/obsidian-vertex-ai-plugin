@@ -803,7 +803,7 @@ export class VertexService {
             return;
           }
 
-          if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+          if ((finishReason as any) === 'MALFORMED_FUNCTION_CALL') {
             // Basic Auto-Correction: Retry once with a nudge
             // We can't strictly retry *this* generation request easily without recursive complexity or modifying 'contents'.
             // Instead, we will throw a specific error that the outer loop *could* handle, or just try to continue if we can.
