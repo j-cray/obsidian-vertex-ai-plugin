@@ -501,12 +501,38 @@ export class VertexService {
     // Auto-Model Selection & Routing
     if (this.autoModelEnabled) {
       // Use the Router to plan the execution strategy
+      // Use the Router to plan the execution strategy
+      // We need to know what models are available.
+      // We can get this from PRECACHED_MODELS or if we had a dynamic list.
+      // For now, let's pass all IDs from PRECACHED_MODELS as 'potentially available'
+      // UNLESS the user has a specific restricted list in settings (which we don't really have yet).
+      // However, to fix the 404, we should effectively remove the invalid ones from the 'available' list we pass here,
+      // OR we update PRECACHED_MODELS.
+      // Better Pattern: Pass PRECACHED_MODELS IDs.
+      // BUT, since the user is getting 404s, it means 'gemini-3-flash' IS in PRECACHED_MODELS but invalid.
+      // So we should strictly valid ones.
+      // Let's rely on PRECACHED_MODELS but assumes `gemini-2.0-flash` is the safe bet if 3 is missing.
+
+      // Let's filter out known-to-be-bad models if we can, or just pass the full list
+      // and let the Router logic I just wrote handle the fallback if we modify the candidate list logic.
+      // Actually, I updated the Router to check `available.includes(c)`.
+
+      // If I pass ['gemini-3-flash', ...] as available, it will still pick it.
+      // The issue is that `gemini-3-flash` is IN the config but NOT in reality.
+      // So I should effectively REMOVE it from the list I pass here.
+
+      // Temporary Fix: Exclude gemini-3-flash from the "available" list until it's real.
+      const allModelIds = PRECACHED_MODELS.map(m => m.id).filter(id => !id.includes('gemini-3-flash'));
+      // ^ Removing 3-flash specifically to solve user 404.
+
       const decision = Router.plan(
         prompt,
         images,
         this.enableSubagents ? this.subagents : [],
-        this.efficiencyMode
+        this.efficiencyMode,
+        allModelIds
       );
+
 
       console.log(`Mastermind: Router Decision -> Model: ${decision.modelId}, Subagent: ${decision.subagent?.name || 'None'}, Strategy: ${decision.tokenStrategy}`);
 

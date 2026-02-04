@@ -20,7 +20,8 @@ export class Router {
   /**
    * Intelligently selects the best model, subagent, and strategy for the task.
    */
-  static plan(prompt: string, images: any[], subagents: Subagent[], efficiencyMode: 'auto' | 'efficient' | 'performance'): RoutingDecision {
+  static plan(prompt: string, images: any[], subagents: Subagent[], efficiencyMode: 'auto' | 'efficient' | 'performance', availableModels: string[] = []): RoutingDecision {
+
     const p = prompt.toLowerCase();
     const imageCount = images.length;
     const complexityScore = this.calculateComplexityScore(p);
@@ -40,7 +41,8 @@ export class Router {
     }
 
     // 3. Select Model
-    let modelId = this.selectModel(p, imageCount, complexityScore, strategy, selectedSubagent);
+    let modelId = this.selectModel(p, imageCount, complexityScore, strategy, availableModels, selectedSubagent);
+
 
     return {
       modelId,
@@ -61,15 +63,22 @@ export class Router {
     return undefined;
   }
 
-  static selectModel(prompt: string, imageCount: number, complexityScore: number = 0, strategy: 'efficient' | 'liberal' = 'efficient', subagent?: Subagent): string {
+  static selectModel(prompt: string, imageCount: number, complexityScore: number = 0, strategy: 'efficient' | 'liberal' = 'efficient', availableModels: string[] = [], subagent?: Subagent): string {
+
     const p = prompt.toLowerCase();
 
     // Subagent preference overrides strict complexity
     if (subagent && subagent.preferredModel) {
       if (strategy === 'efficient' && subagent.preferredModel.includes('pro')) {
-        return this.getBestFlashModel();
+        return this.getBestFlashModel(availableModels);
+      }
+      // Verify subagent preferred model is available
+      if (availableModels.length > 0 && !availableModels.includes(subagent.preferredModel)) {
+        // Fallback if preferred not available
+        return strategy === 'liberal' ? this.getBestProModel(availableModels) : this.getBestFlashModel(availableModels);
       }
       return subagent.preferredModel;
+
     }
 
     // Image Gen Override
@@ -79,15 +88,17 @@ export class Router {
 
     // Multimodal -> Liberal/Pro
     if (imageCount > 0) {
-      return this.getBestProModel();
+      return this.getBestProModel(availableModels);
     }
+
 
     // Strategy based
     if (strategy === 'liberal') {
-      return this.getBestProModel();
+      return this.getBestProModel(availableModels);
     } else {
-      return this.getBestFlashModel();
+      return this.getBestFlashModel(availableModels);
     }
+
   }
 
   /**
@@ -151,13 +162,43 @@ export class Router {
     return score;
   }
 
-  private static getBestProModel(): string {
-    const best = PRECACHED_MODELS.find(m => m.id.includes('pro') && m.isModern);
-    return best ? best.id : 'gemini-3-pro-preview';
+  // --- Internal Heuristics ---
+
+  private static safeSelect(candidates: string[], available: string[]): string {
+    // If available list is empty, we assume all are potentially available (legacy behavior) or we just pick the first candidate
+    if (!available || available.length === 0) return candidates[0];
+
+    // Find the first candidate that exists in available list
+    for (const c of candidates) {
+      if (available.includes(c)) return c;
+    }
+
+    // Fallback: Just return the first available model, or the first candidate if none match
+    return available[0] || candidates[0];
   }
 
-  private static getBestFlashModel(): string {
-    const best = PRECACHED_MODELS.find(m => m.id.includes('flash') && m.isModern);
-    return best ? best.id : 'gemini-3-flash';
+  private static getBestProModel(available: string[] = []): string {
+    const candidates = [
+      'gemini-3-pro',
+      'gemini-3-pro-preview',
+      'gemini-2.5-pro',
+      'gemini-2.0-pro-exp',
+      'gemini-1.5-pro'
+    ];
+    // PRECACHED_MODELS is useful for metadata, but here we just need IDs in preference order
+    return this.safeSelect(candidates, available);
   }
+
+  private static getBestFlashModel(available: string[] = []): string {
+    const candidates = [
+      'gemini-3-flash',
+      'gemini-3-flash-preview',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash'
+    ];
+    return this.safeSelect(candidates, available);
+  }
+
 }
