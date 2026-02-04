@@ -127,9 +127,12 @@ export class SessionManager {
 
         if (chunk.isThinking) {
           updateLastMessage({ thinking: chunk.thinkingText }, true);
-        } else {
-          finalText = chunk.text;
-          finalActions = chunk.actions || [];
+        }
+
+        // ALWAYS update text/actions if present, even if thinking
+        if (chunk.text !== undefined || (chunk.actions && chunk.actions.length > 0)) {
+          finalText = chunk.text || finalText; // Keep existing if undefined, update if present
+          if (chunk.actions) finalActions = chunk.actions;
 
           updateLastMessage({
             parts: [{ text: finalText }],
@@ -137,6 +140,7 @@ export class SessionManager {
             model: chunk.acceptedModelId
           });
         }
+
       }
 
 
