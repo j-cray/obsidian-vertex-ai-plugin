@@ -225,18 +225,28 @@ export class MastermindChatView extends ItemView {
       this.messageRenderer.renderAIMessage({
         role: 'model',
         parts: [{ text: 'Greetings. I am Mastermind. Ready.' }]
-      } as ChatMessage, this.plugin.settings.profilePictureAI);
+      } as ChatMessage, this.plugin.settings.profilePictureAI).then(el => {
+        if (el.parentElement) el.parentElement.addClass('empty-state-greeting');
+      });
       return;
     }
+
 
     // Naive Diffing:
     // If we have more messages than DOM nodes, append.
     // If same number, update the last one (assuming it's the only one changing during streaming).
     const domMessages = this.messageContainer.querySelectorAll('.chat-message-block');
-    const domCount = domMessages.length;
+    let domCount = domMessages.length;
+
+    // Check if the only message is the empty state greeting, if so treat as empty
+    if (domCount === 1 && domMessages[0].classList.contains('empty-state-greeting')) {
+      this.messageContainer.empty(); // Clear greeting
+      domCount = 0;
+    }
 
     // If completely new chat (or clear), reset
     if (domCount === 0 && messages.length > 0) {
+
       this.messageContainer.empty();
       messages.forEach(msg => this.appendMessage(msg));
     } else if (messages.length > domCount) {
