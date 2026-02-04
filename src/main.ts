@@ -6,8 +6,9 @@ import {
   Notice,
   DropdownComponent,
 } from "obsidian";
-import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/chatview";
+import { MastermindChatView, VIEW_TYPE_MASTERMIND } from "./views/ChatView";
 import { VertexService } from "./services/vertex";
+import { AgentRuntime } from "./runtime/Runtime";
 
 interface MastermindSettings {
   // Authentication
@@ -202,6 +203,9 @@ export default class MastermindPlugin extends Plugin {
       }, 2000); // Wait 2s after plugin loads
     }
 
+    // Initialize Agent Runtime
+    AgentRuntime.initialize(this);
+
     this.registerView(
       VIEW_TYPE_MASTERMIND,
       (leaf) => new MastermindChatView(leaf, this),
@@ -247,7 +251,7 @@ export default class MastermindPlugin extends Plugin {
               // Assuming view.inputEl exists, but we need to check
               if (view.inputEl) {
                 view.inputEl.value = `Explain this:\n> ${selection}`;
-                view.handleSendMessage();
+                view.onSendMessage();
               }
             }
           }

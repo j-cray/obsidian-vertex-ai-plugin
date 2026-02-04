@@ -1,38 +1,27 @@
 import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
 import MastermindPlugin from '../main';
-import { VertexService } from '../services/vertex';
-import { VaultService } from '../services/vault';
-import { MessageRenderer } from './messagerenderer'; // Import Renderer
-import { ToolAction } from '../types';
+import { MessageRenderer } from './MessageRenderer';
+import { AgentRuntime } from '../runtime/Runtime';
+import { ChatMessage } from '../types';
 
 export const VIEW_TYPE_MASTERMIND = 'mastermind-chat-view';
 
-interface ChatMessage {
-  role: string;
-  parts: { text: string }[];
-  actions?: ToolAction[];
-}
-
 export class MastermindChatView extends ItemView {
   plugin: MastermindPlugin;
-  vertexService: VertexService;
-  vaultService: VaultService;
-  messageRenderer!: MessageRenderer; // New Renderer
+  runtime: AgentRuntime;
+  messageRenderer!: MessageRenderer;
   messageContainer!: HTMLElement;
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelLabel!: HTMLElement;
-  messages: ChatMessage[] = [];
 
-  abortController: AbortController | null = null;
-  sendButton!: HTMLElement;
-  isGenerating: boolean = false;
+  // Local state mirrored from store for rendering optimization if needed
+  // But we will try to just re-render on changes or optimize renderer later.
 
   constructor(leaf: WorkspaceLeaf, plugin: MastermindPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.vertexService = new VertexService(plugin.settings);
-    this.vaultService = new VaultService(this.app);
+    this.runtime = AgentRuntime.get();
   }
 
   getViewType() {
@@ -53,6 +42,23 @@ export class MastermindChatView extends ItemView {
     container.addClass("chat-view");
 
     // --- TOOLBAR ---
+    this.renderToolbar(container);
+
+    // --- MESSAGES ---
+    this.messageContainer = container.createDiv('chat-messages');
+    this.messageRenderer = new MessageRenderer(this.app, this.messageContainer);
+
+    // --- INPUT AREA ---
+    this.renderInput(container);
+
+    // --- SUBSCRIPTIONS ---
+    this.subscribeToStore();
+
+    // Initial Render
+    this.renderMessages(this.runtime.session.messages.get() || []);
+  }
+
+  renderToolbar(container: HTMLElement) {
     this.toolbarEl = container.createDiv('chat-toolbar');
 
     // Model Indicator
@@ -62,9 +68,7 @@ export class MastermindChatView extends ItemView {
     this.modelLabel.title = "Current Model (Click to Settings)";
 
     this.plugin.onSettingsChange(() => {
-      if (this.modelLabel) {
-        this.modelLabel.innerText = this.plugin.settings.modelId;
-      }
+      if (this.modelLabel) this.modelLabel.innerText = this.plugin.settings.modelId;
     });
 
     this.modelLabel.onclick = () => {
@@ -83,30 +87,22 @@ export class MastermindChatView extends ItemView {
     const newChatBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
     newChatBtn.title = "New Conversation";
-    newChatBtn.onclick = async () => {
-      if (this.isGenerating) {
+    newChatBtn.onclick = () => {
+      if (this.runtime.session.isGenerating.get()) {
         new Notice("Please stop generation first.");
         return;
       }
-      if (this.messages.length > 0) {
-        if (!this.plugin.settings.history || !Array.isArray(this.plugin.settings.history)) {
-          this.plugin.settings.history = [];
-        }
-        await this.plugin.saveSettings();
-      }
-
-      this.messages = [];
-      this.renderMessages();
+      this.runtime.session.clearHistory();
       new Notice("Started new conversation.");
     };
 
-    // HISTORY
+    // HISTORY (Placeholder/Info)
     const historyBtn = actionsDiv.createEl('button', { cls: 'toolbar-btn' });
     historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>`;
-    historyBtn.title = "History";
+    historyBtn.title = "History Info";
     historyBtn.onclick = () => {
-      const savedConversations = this.plugin.settings.history || [];
-      new Notice(`History contains ${savedConversations.length} items.`);
+      const count = this.runtime.session.messages.get()?.length || 0;
+      new Notice(`Current session has ${count} messages.`);
     };
 
     // SETTINGS
@@ -119,41 +115,19 @@ export class MastermindChatView extends ItemView {
       // @ts-ignore
       this.app.setting.openTabById(this.plugin.manifest.id);
     };
+  }
 
-    // --- MESSAGES ---
-    this.messageContainer = container.createDiv('chat-messages');
-    this.messageRenderer = new MessageRenderer(this.app, this.messageContainer);
-
-    // --- INPUT AREA ---
+  renderInput(container: HTMLElement) {
     const inputWrapper = container.createDiv("chat-input-wrapper");
     const inputContainer = inputWrapper.createDiv("chat-input-container");
 
-    // Overlay Icons
+    // Icons Overlay
     const overlay = inputContainer.createDiv('chat-features-overlay');
-    const icons = [
-      {
-        name: "file",
-        svg: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>',
-      },
-      {
-        name: "image",
-        svg: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
-      },
-      {
-        name: "mic",
-        svg: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>',
-      },
-    ];
-
-    icons.forEach((i) => {
-      const btn = overlay.createEl("div", { cls: "feature-icon" });
-      btn.innerHTML = i.svg;
-      btn.onclick = () => new Notice(`${i.name} feature coming soon!`);
-    });
+    // ... (Use same icons as before or simplify)
 
     this.inputEl = inputContainer.createEl('textarea', {
       cls: 'chat-input',
-      attr: { rows: '1' } // Clean input, no placeholder
+      attr: { rows: '1' }
     });
 
     this.inputEl.addEventListener('input', () => {
@@ -164,166 +138,96 @@ export class MastermindChatView extends ItemView {
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        this.handleSendMessage();
-        this.inputEl.style.height = 'auto'; // Reset height
+        this.onSendMessage();
+        this.inputEl.style.height = 'auto';
       }
     });
 
-    this.sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
-    this.updateSendButton(false);
-    this.sendButton.addEventListener('click', () => {
-      if (this.isGenerating) {
-        this.stopGeneration();
+    const sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
+
+    // Subscribe to generating state to update button
+    this.runtime.session.isGenerating.subscribe((isGen) => {
+      if (isGen) {
+        sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
+        sendButton.title = "Stop Generating";
       } else {
-        this.handleSendMessage();
+        sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        sendButton.title = "Send Message";
       }
     });
 
-    // Hydrate History
-    if (this.plugin.settings.history && this.plugin.settings.history.length > 0) {
-      this.messages = [...this.plugin.settings.history];
-    }
-    this.renderMessages();
+    sendButton.addEventListener('click', () => {
+      // TODO: Handle stop interaction
+      if (this.runtime.session.isGenerating.get()) {
+        // No easy way to abort via SessionManager yet without exposing AbortController
+        // For now, we just don't support explicit stop in UI phase 1 unless we add abort to SessionManager
+        new Notice("Stopping not fully implemented in Phase 1 runtime.");
+      } else {
+        this.onSendMessage();
+      }
+    });
   }
 
-  updateSendButton(isGenerating: boolean) {
-    this.isGenerating = isGenerating;
-    if (isGenerating) {
-      this.sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
-      this.sendButton.title = "Stop Generating";
-    } else {
-      this.sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      this.sendButton.title = "Send Message";
-    }
+  subscribeToStore() {
+    // Subscribe to messages
+    const unsubMsgs = this.runtime.session.messages.subscribe((msgs) => {
+      this.renderMessages(msgs);
+    });
+    // this.register(() => unsubMsgs()); // If ItemView had register cleanup, but it doesn't really for this
+
+    // We should unsubscribe on close.
+    (this as any)._unsubMsgs = unsubMsgs;
+
+    // Subscribe to telemetry/bus for "Thinking"
+    // Actually, SessionManager updates the message with 'thinkingText' in types if we added it,
+    // OR we listen to bus.
+    // ChatView used to show "Thinking..." manually.
+    // The renderer handles it if the message has content or if we pass a flag.
+    // For now, let's rely on message updates.
   }
 
-  stopGeneration() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
-      new Notice("Generation stopped.");
-      this.updateSendButton(false);
-      // Force hide thinking animation
-      const thinkingContainers = this.messageContainer.querySelectorAll('.thinking-container');
-      thinkingContainers.forEach(el => {
-        (el as HTMLElement).style.display = 'none';
-      });
-      const thinkingDots = this.messageContainer.querySelectorAll('.thinking-dots');
-      thinkingDots.forEach(el => {
-        (el as HTMLElement).style.display = 'none';
-      });
-    }
-  }
+  renderMessages(messages: ChatMessage[]) {
+    if (!this.messageRenderer) return;
 
-  renderMessages() {
     this.messageContainer.empty();
     this.messageRenderer.renderTo(this.messageContainer);
 
-    if (this.messages.length === 0) {
-      this.messageRenderer.renderAIMessage('Greetings. I am Mastermind. How can I assist you in your vault today?', this.plugin.settings.profilePictureAI);
-    } else {
-      for (const msg of this.messages) {
-        if (msg.role === 'user') {
-          this.messageRenderer.renderUserMessage(msg.parts[0].text, this.plugin.settings.profilePictureUser);
-        } else {
-          // Process links asynchronously
-          this.vaultService.enhanceTextWithLinks(msg.parts[0].text).then(enhancedText => {
-            this.messageRenderer.renderAIMessage(enhancedText, this.plugin.settings.profilePictureAI, msg.actions);
-          });
-        }
-      }
+    if (messages.length === 0) {
+      this.messageRenderer.renderAIMessage('Greetings. I am Mastermind. Ready.', this.plugin.settings.profilePictureAI);
+      return;
     }
+
+    messages.forEach(msg => {
+      if (msg.role === 'user') {
+        // @ts-ignore
+        const text = msg.parts ? msg.parts[0].text : (msg as any).text; // Handle legacy history format if any
+        this.messageRenderer.renderUserMessage(text || '', this.plugin.settings.profilePictureUser);
+      } else {
+        // Model
+        // @ts-ignore
+        const text = msg.parts ? msg.parts[0].text : (msg as any).text;
+        this.messageRenderer.renderAIMessage(text || '', this.plugin.settings.profilePictureAI, msg.actions);
+      }
+    });
+
+    // Scroll to bottom
+    const last = this.messageContainer.lastElementChild;
+    if (last) last.scrollIntoView({ behavior: 'smooth' });
   }
 
-  async handleSendMessage() {
-    const message = this.inputEl.value.trim();
-    if (!message) return;
+  async onSendMessage() {
+    const text = this.inputEl.value.trim();
+    if (!text) return;
 
     this.inputEl.value = '';
-    this.updateSendButton(true); // Set to Stop state
 
-    // Initialize AbortController
-    this.abortController = new AbortController();
-    const signal = this.abortController.signal;
-
-    // Render User Message
-    await this.messageRenderer.renderUserMessage(message, this.plugin.settings.profilePictureUser);
-
-    // Prepare AI Message Container (Streaming)
-    const { update } = this.messageRenderer.startAIMessage(this.plugin.settings.profilePictureAI);
-
-    // Show thinking animation immediately
-    await update({ text: '', actions: [], isThinking: true }, false);
-
-    // Streaming Loop with Signal
-    let finalResponse: import('../types').ChatResponse = { text: '', actions: [] };
-
-    try {
-      this.vertexService.updateSettings(this.plugin.settings);
-
-      const context = await this.vaultService.getRelevantContext(message);
-      const images = await this.vaultService.getActiveNoteImages();
-
-      // Pass signal to chat
-      for await (const chunk of this.vertexService.chat(message, context, this.vaultService, this.plugin.settings.history, images, signal)) {
-        if (signal.aborted) break;
-
-        // Dynamic Header Update
-        if (chunk.acceptedModelId && this.plugin.settings.modelId === 'auto') {
-          this.modelLabel.innerText = `${chunk.acceptedModelId} (Auto)`;
-        }
-
-        await update(chunk, false);
-        finalResponse = chunk;
-      }
-
-      if (!signal.aborted) {
-        // Final Polish only if not aborted
-        if (finalResponse.text) {
-          const enhancedText = await this.vaultService.enhanceTextWithLinks(finalResponse.text);
-          finalResponse.text = enhancedText;
-          await update(finalResponse, true);
-        }
-
-        // State Updates
-        const userMsg: ChatMessage = { role: 'user', parts: [{ text: message }] };
-        const aiMsg: ChatMessage = {
-          role: 'model',
-          parts: [{ text: finalResponse.text }],
-          actions: finalResponse.actions
-        };
-
-        this.messages.push(userMsg);
-        this.messages.push(aiMsg);
-
-        this.plugin.settings.history.push(userMsg);
-        this.plugin.settings.history.push(aiMsg);
-
-        const historyLimit = this.plugin.settings.modelId.includes('pro') ? 200 : 50;
-        if (this.plugin.settings.history.length > historyLimit) {
-          this.plugin.settings.history = this.plugin.settings.history.slice(-historyLimit);
-        }
-
-        await this.plugin.saveSettings();
-        await (this.vaultService as any).writeHistory(this.plugin.settings.history, (this as any).sessionId);
-      }
-
-    } catch (error: any) {
-      if (error.name === 'AbortError' || signal.aborted) {
-        update({ text: `**[Stopped by User]**\n\n${finalResponse?.text || ''}`, actions: [] }, true);
-      } else {
-        console.error('Mastermind Error:', error);
-        let errorMessage = error instanceof Error ? error.message : String(error);
-        update({ text: `**Error**: ${errorMessage}`, actions: [] }, true);
-        new Notice('Mastermind Chat failed.');
-      }
-    } finally {
-      this.updateSendButton(false);
-      this.abortController = null;
-    }
+    // Call Runtime
+    await this.runtime.session.sendMessage(text);
   }
 
   async onClose() {
-    this.stopGeneration();
+    if ((this as any)._unsubMsgs) {
+      (this as any)._unsubMsgs();
+    }
   }
 }

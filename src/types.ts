@@ -13,3 +13,9 @@ export interface ChatResponse {
   usage?: { input: number; output: number };
   acceptedModelId?: string; // The actual model used (e.g. for Auto mode)
 }
+
+export interface ChatMessage {
+  role: string;
+  parts: { text: string }[];
+  actions?: ToolAction[];
+}
