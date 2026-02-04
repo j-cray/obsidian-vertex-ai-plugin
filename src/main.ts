@@ -18,8 +18,11 @@ interface MastermindSettings {
   location: string;
   modelId: string;
   history: any[];
+  // Memory
+  userProfilePath: string;
   // Permissions
   permVaultRead: boolean;
+
   permVaultWrite: boolean;
   permVaultDelete: boolean;
   permWeb: boolean;
@@ -47,7 +50,9 @@ const DEFAULT_SETTINGS: MastermindSettings = {
   location: 'us-central1',
   modelId: 'gemini-2.0-flash-exp',
   history: [],
+  userProfilePath: 'Mastermind/User Profile.md',
   permVaultRead: true,
+
   permVaultWrite: true,
   permVaultDelete: false,
   permWeb: true,
@@ -747,6 +752,19 @@ class MastermindSettingTab extends PluginSettingTab {
           this.plugin.settings.customContextPrompt = value;
           await this.plugin.saveSettings();
         }));
+
+    containerEl.createEl('h3', { text: 'Memory & Personalization' });
+
+    new Setting(containerEl)
+      .setName('User Profile Path')
+      .setDesc('Path to the markdown file containing your profile (e.g., Mastermind/User Profile.md).')
+      .addText(text => text
+        .setValue(this.plugin.settings.userProfilePath)
+        .onChange(async (value) => {
+          this.plugin.settings.userProfilePath = value;
+          await this.plugin.saveSettings();
+        }));
   }
 
 }
+

@@ -111,8 +111,19 @@ export class SessionManager {
       const history = this.messages.get(); // Get current history
       // Note: We might want to filter history here or inside VertexService
 
-      for await (const chunk of this.runtime.vertex.chat(text, context, this.runtime.vault, history, images, signal)) {
+
+      // Fetch User Profile
+      let userProfile = '';
+      try {
+        const profilePath = this.runtime.plugin.settings.userProfilePath || 'Mastermind/User Profile.md';
+        userProfile = await this.runtime.vault.readNote(profilePath) || '';
+      } catch (e) {
+        // Ignore if profile doesn't exist
+      }
+
+      for await (const chunk of this.runtime.vertex.chat(text, context, this.runtime.vault, history, images, userProfile, signal)) {
         if (signal?.aborted) break;
+
 
         if (chunk.isThinking) {
           updateLastMessage({ thinking: chunk.thinkingText }, true);

@@ -522,7 +522,8 @@ export class VertexService {
     return 'gemini-2.5-flash';
   }
 
-  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
+  async *chat(prompt: string, context: string, vaultService: any, history: any[] = [], images: { mimeType: string, data: string }[] = [], userProfile: string = '', signal?: AbortSignal): AsyncGenerator<ChatResponse, void, unknown> {
+
     const projectId = this.getProjectId();
     let modelId = this.modelId || 'gemini-2.0-flash-exp';
     const location = this.location || 'us-central1';
@@ -556,15 +557,11 @@ export class VertexService {
       You have access to the user's Obsidian Vault. Prioritize accuracy and preserving user data.`;
 
 
-      // Inject User Profile (Memory)
-      try {
-        const userProfile = await vaultService.getUserProfile();
-        if (userProfile && userProfile.trim().length > 0) {
-          systemInstructionText += `\n\n<user_profile>\n${userProfile}\n</user_profile>\n(Adapt your personality and responses according to this profile.)`;
-        }
-      } catch (e) {
-        console.warn('Mastermind: Failed to load user profile.', e);
+      // Inject User Profile (Memory) if provided
+      if (userProfile && userProfile.trim().length > 0) {
+        systemInstructionText += `\n\n<user_profile>\n${userProfile}\n</user_profile>\n(Adapt your personality and responses according to this profile.)`;
       }
+
 
 
       const functionDeclarations: any[] = [
