@@ -134,9 +134,9 @@ export class MessageRenderer {
     let isVisible = false;
 
     // Check for pending tools
-    const pendingTool = msg.actions?.find(a => !a.output && !a.error);
+    const pendingTool = msg.actions?.find(a => a.status === 'pending');
     if (pendingTool) {
-      statusText = `Using Tool: ${pendingTool.name}...`;
+      statusText = `Using Tool: ${pendingTool.tool}...`;
       isVisible = true;
       chip.addClass('pulsing');
     } else if (msg.thinking && !msg.parts?.[0]?.text) {
@@ -190,12 +190,12 @@ export class MessageRenderer {
     if (msg.actions) {
       for (const action of msg.actions) {
         const item = content.createDiv('log-entry tool-entry');
-        if (!action.output && !action.error) item.addClass('pending');
-        if (action.error) item.addClass('error');
+        if (action.status === 'pending') item.addClass('pending');
+        if (action.status === 'error') item.addClass('error');
 
         const icon = item.createSpan('log-icon');
         setIcon(icon, 'wrench');
-        item.createSpan({ text: `Used ${action.name}`, cls: 'log-text' });
+        item.createSpan({ text: `Used ${action.tool}`, cls: 'log-text' });
 
         // If output exists, maybe show a snippet?
         // For now keep it one-line summary unless expanded.
