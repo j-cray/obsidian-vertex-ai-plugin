@@ -620,62 +620,122 @@
     line-height: 1.5;
 }
 
-/* THINKING BLOCKS */
-.markdown-preview-view pre.language-thinking,
-.markdown-source-view .cm-line .cm-thinking {
-    background-color: rgba(var(--mono-rgb-100), 0.03) !important;
-    border-left: 3px solid var(--accent-color) !important;
-    border-radius: 4px;
-    padding: 8px 12px !important;
-    color: var(--text-muted) !important;
-    font-style: italic;
-    font-family: 'Inter', var(--font-interface), sans-serif !important;
-    /* Use interface font for thoughts, not code font */
+/* ACTIVITY LOG & STATUS */
+
+/* Status Chip - The "What am I doing now?" indicator */
+.chat-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(var(--interactive-accent-rgb), 0.1);
+    padding: 4px 12px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    border: 1px solid rgba(var(--interactive-accent-rgb), 0.2);
+    transition: all 0.3s ease;
 }
 
-/* Hide the "thinking" language label if possible, or style it */
-.markdown-preview-view pre.language-thinking:before {
-    content: "Thinking Process";
+.chat-status-chip.pulsing::before {
+    content: '';
     display: block;
-    font-size: 10px;
-    font-weight: bold;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-    color: var(--accent-color);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+    animation: flash 1.5s infinite;
+}
+
+@keyframes flash {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.3;
+    }
+}
+
+/* Unified Activity Log */
+.agent-activity-log {
+    background: var(--background-primary);
+    /* Terminal feel */
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 0;
+    margin-bottom: 12px;
+    font-family: var(--font-monospace);
+    font-size: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.activity-log-header {
+    background: rgba(var(--mono-rgb-100), 0.05);
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-muted);
+    border-bottom: 1px solid transparent;
+}
+
+.agent-activity-log:not(.collapsed) .activity-log-header {
+    border-bottom-color: var(--background-modifier-border);
+}
+
+.agent-activity-log.collapsed .activity-log-content {
+    display: none;
+}
+
+.activity-log-content {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Log Entries */
+.log-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--text-normal);
+}
+
+.log-entry.tool-entry {
+    color: var(--interactive-accent);
+}
+
+.log-entry.tool-entry.pending {
     opacity: 0.8;
 }
 
-/* Tool Action Cards */
-.chat-tool-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 8px;
-    width: 100%;
+.log-entry.thought-entry {
+    color: var(--text-muted);
+    font-style: italic;
+    white-space: pre-wrap;
 }
 
-.tool-action-card {
-    background-color: var(--background-secondary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 0.9em;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    transition: all 0.2s ease;
+.log-icon {
+    width: 14px;
+    height: 14px;
+    margin-top: 1px;
+    /* Align with text */
+    flex-shrink: 0;
 }
 
-.tool-action-card.tool-error {
-    border-color: var(--text-error);
-    background-color: rgba(var(--color-red-rgb), 0.1);
-}
-
-.tool-action-card.tool-pending {
-    border-color: var(--interactive-accent);
-    background-color: rgba(var(--interactive-accent-rgb), 0.05);
-    animation: pulse-border 1.5s ease-in-out infinite;
-}
 
 @keyframes pulse-border {
 

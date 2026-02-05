@@ -499,13 +499,14 @@ export class MastermindChatView extends ItemView {
       domCount = 0;
     }
 
-    // 0. Cleanup: Remove pending-generation from all previous messages
+    // 0. Cleanup: Remove pending-generation and tool-pending from all previous messages
     // This ensures that when a new message arrives, the previous one stops shimmering immediately.
     domMessages.forEach((el, index) => {
       // If it's not the last one, it definitely shouldn't be pending.
       // Even if it IS the last one, we'll re-assess below.
       if (index < messages.length - 1) {
         el.removeClass('pending-generation');
+        el.querySelectorAll('.tool-pending').forEach(t => t.removeClass('tool-pending'));
       }
     });
 
