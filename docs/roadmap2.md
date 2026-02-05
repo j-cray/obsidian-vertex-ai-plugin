@@ -48,7 +48,7 @@ The goal is to transition from a simple "Chat Integration" to a true **Agentic A
 ### Phase 3: Intelligence - The "Mastermind" Orchestrator
 
 **Type:** Phase
-**Description:** Implementing the high-level cognitive architecture. Moving from "ReAct" loops to simpler or more complex routing as defined in Google's agent patterns.
+**Description:** Implementing the high-level cognitive a/rchitecture. Moving from "ReAct" loops to simpler or more complex routing as defined in Google's agent patterns.
 **Assignee:** Jake Wray
 
 | Task ID | Task Name | Description | Estimate | Start Date | Due Date |
@@ -71,7 +71,6 @@ The goal is to transition from a simple "Chat Integration" to a true **Agentic A
 | **4.1** | **Multimodal Input Support** | Allow dragging and dropping images/audio into the chat. Agent uses `gemini-pro-vision` capabilities to analyze assets. | 14h | TBD | TBD |
 | **4.2** | **Streaming UI Refinement** | Smooth "Typewriter" effect, robust error handling for network drops, and Markdown rendering optimization for large responses. | 10h | TBD | TBD |
 | **4.3** | **Security & Guardrails** | Implement "Safety Settings" (Hate speech, dangerous content) and a "Prompt Injection" defense layer (Model Armor concepts). | 8h | TBD | TBD |
-| **4.4** | **Onboarding Experience** | Create an interactive "Welcome" tour that helps users set up their Google Cloud Project credentials and choose their first model. | 12h | TBD | TBD |
 
 ---
 
