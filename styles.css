@@ -346,8 +346,8 @@
 /* INPUT AREA FIXES */
 .chat-input-wrapper {
     background: transparent;
-    padding: 0 16px 20px 16px;
-    /* Floating up slightly from bottom */
+    padding: 0 16px 40px 16px;
+    /* Lifted higher (40px) */
     position: relative;
     display: flex;
     flex-direction: column;
@@ -359,16 +359,25 @@
     position: relative;
     width: 100%;
     display: flex;
-    align-items: flex-end;
-    /* Align bottom */
+    align-items: center;
+    /* Center items vertically */
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    /* Springy expand */
+}
+
+/* Expansion Effect on Hover/Focus */
+.chat-input-container:hover,
+.chat-input-container:focus-within {
+    transform: scale(1.02);
 }
 
 /* LEFT MENU (+ Button) - ABSOLUTE OVERLAY */
 .chat-features-menu {
     position: absolute;
-    left: 6px;
-    bottom: 6px;
-    /* Inside the input bar */
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    /* Perfectly centered */
     width: 32px;
     height: 32px;
     display: flex;
@@ -378,13 +387,13 @@
 }
 
 .chat-plus-button {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    /* Smaller */
+    height: 24px;
     border-radius: 50%;
     border: 1px solid var(--text-muted);
-    /* Thin circular border */
-    background: transparent;
-    /* Transparent as requested */
+    background: transparent !important;
+    /* Force Transparent */
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
@@ -395,8 +404,9 @@
 }
 
 .chat-plus-button svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    /* Smaller glyph */
+    height: 14px;
     stroke-width: 2px;
 }
 
@@ -410,49 +420,13 @@
 .chat-plus-popup {
     position: absolute;
     bottom: 40px;
-    /* Above the button */
     left: 0;
     display: flex;
     flex-direction: column-reverse;
-    /* Stack upwards */
     gap: 8px;
     z-index: 100;
     align-items: center;
     padding-bottom: 8px;
-}
-
-.chat-plus-menu-item {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: all 0.2s ease;
-    animation: popup-bounce 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.chat-plus-menu-item:hover {
-    background: var(--interactive-accent);
-    color: white;
-    transform: scale(1.1);
-}
-
-@keyframes popup-bounce {
-    from {
-        opacity: 0;
-        transform: translateY(10px) scale(0.8);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
 }
 
 /* INPUT FIELD */
@@ -463,44 +437,47 @@
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
     border-radius: 24px;
-    /* More pill-shaped */
 
-    /* Padding Buffer */
-    /* Left: 6px margin + 32px button + 6px gap = ~44px */
-    padding: 12px 50px 12px 48px;
+    /* Compact Padding */
+    /* Left: 8px margin + 24px button + 8px gap = 40px */
+    padding: 8px 45px 8px 45px;
 
     color: var(--text-normal);
-    min-height: 44px;
-    /* Slightly compact */
+    min-height: 38px;
+    /* Reduced height */
     max-height: 200px;
-    line-height: 1.5;
-    font-size: 15px;
+    line-height: 1.4;
+    font-size: 14px;
     overflow-y: auto;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+/* No BG change on hover, maintain expansion via container */
+.chat-input:hover,
 .chat-input:focus {
     border-color: var(--interactive-accent);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    /* Floating shadow */
+    background: var(--background-secondary);
+    /* Stable BG */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-/* SEND BUTTON (Fixed Color) */
+/* SEND BUTTON */
 .chat-send-button {
     position: absolute;
     right: 8px;
-    bottom: 8px;
-    /* Stick to bottom right */
+    top: 50%;
+    transform: translateY(-50%);
+    /* Centered */
     background: transparent !important;
     border: none !important;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    /* Slightly smaller */
+    height: 28px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--interactive-accent);
-    /* Blue/Purple */
     padding: 0;
     z-index: 5;
     box-shadow: none !important;
@@ -512,12 +489,12 @@
 }
 
 .chat-send-button:hover {
-    transform: scale(1.1);
+    transform: translateY(-50%) scale(1.1);
+    /* Modify transform correctly */
     color: var(--text-normal);
 }
 
 .chat-send-button svg {
-    width: 22px;
     height: 22px;
     fill: none;
     stroke: currentColor;
