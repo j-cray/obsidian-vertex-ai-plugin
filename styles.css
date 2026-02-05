@@ -728,20 +728,50 @@
 /* --- PHASE 3 UI ENHANCEMENTS --- */
 
 /* 1. Working Pulse Animation for AI Messages */
+/* 1. Working Pulse Animation for AI Messages */
 .message-block-ai.pending-generation .message-ai {
-    background: linear-gradient(120deg, var(--ai-msg-bg) 30%, rgba(140, 140, 160, 0.1) 38%, var(--ai-msg-bg) 40%, var(--ai-msg-bg) 48%);
-    background-size: 200% 100%;
-    animation: ai-pulse 3s linear infinite;
-    border-color: rgba(99, 102, 241, 0.3);
+    position: relative;
+    overflow: hidden;
+    /* Ensure shimmer stays inside border */
+    border-color: rgba(255, 215, 0, 0.4);
+    /* Subtle Gold Border */
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.1);
 }
 
-@keyframes ai-pulse {
+.message-block-ai.pending-generation .message-ai::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 200%;
+    height: 100%;
+    /* Slick Gold Shimmer Gradient */
+    background: linear-gradient(110deg,
+            transparent 30%,
+            rgba(255, 215, 0, 0.1) 45%,
+            /* Faint Gold */
+            rgba(255, 255, 200, 0.25) 50%,
+            /* White/Gold Highlight */
+            rgba(255, 215, 0, 0.1) 55%,
+            /* Faint Gold */
+            transparent 70%);
+    transform: skewX(-20deg) translateX(-150%);
+    pointer-events: none;
+    mix-blend-mode: screen;
+    /* Additive glow, preserves text legibility */
+    animation: gold-shimmer 2.5s infinite linear;
+    z-index: 2;
+    /* Sit above text background but blend mode handles visibility */
+}
+
+@keyframes gold-shimmer {
     0% {
-        background-position: 100% 0;
+        transform: skewX(-20deg) translateX(-150%);
     }
 
     100% {
-        background-position: -100% 0;
+        transform: skewX(-20deg) translateX(50%);
+        /* Move across */
     }
 }
 
