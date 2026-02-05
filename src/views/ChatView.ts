@@ -499,6 +499,16 @@ export class MastermindChatView extends ItemView {
       domCount = 0;
     }
 
+    // 0. Cleanup: Remove pending-generation from all previous messages
+    // This ensures that when a new message arrives, the previous one stops shimmering immediately.
+    domMessages.forEach((el, index) => {
+      // If it's not the last one, it definitely shouldn't be pending.
+      // Even if it IS the last one, we'll re-assess below.
+      if (index < messages.length - 1) {
+        el.removeClass('pending-generation');
+      }
+    });
+
     // 1. Append New Messages
     for (let i = domCount; i < messages.length; i++) {
       const msg = messages[i];
@@ -522,22 +532,31 @@ export class MastermindChatView extends ItemView {
 
     // 2. Update Existing Messages (Streaming)
     // We mainly care about the last message if it's currently streaming/updating.
-    if (messages.length > 0 && messages.length === domCount) {
+    if (messages.length > 0 && messages.length >= domCount) {
+      // Always re-evaluate the last message's state
       const lastIndex = messages.length - 1;
       const lastMsg = messages[lastIndex];
-      const lastDom = domMessages[domMessages.length - 1] as HTMLElement; // Map last to last
+      // Get the last DOM element (whether newly appended or existing)
+      // Note: If we just appended, querySelectorAll result 'domMessages' is stale.
+      // So we should fetch container's last child.
+      const lastDom = this.messageContainer.lastElementChild as HTMLElement;
 
-      const avatarUrl = lastMsg.role === 'user'
-        ? this.plugin.settings.profilePictureUser
-        : this.getAvatarForModel(lastMsg.model || this.plugin.settings.modelId);
+      if (lastDom && lastDom.classList.contains('chat-message-block')) {
+        // Only update content if we are strictly updating an existing one (same count)
+        // If we appended, the render above handled content.
+        if (messages.length === domCount) {
+          const avatarUrl = lastMsg.role === 'user'
+            ? this.plugin.settings.profilePictureUser
+            : this.getAvatarForModel(lastMsg.model || this.plugin.settings.modelId);
+          this.messageRenderer.updateMessage(lastDom, lastMsg, avatarUrl);
+        }
 
-      this.messageRenderer.updateMessage(lastDom, lastMsg, avatarUrl);
-
-      // Sync Pulse State
-      if (this.runtime.session.isGenerating.get()) {
-        lastDom.addClass('pending-generation');
-      } else {
-        lastDom.removeClass('pending-generation');
+        // Sync Pulse State for the TRUE last message
+        if (this.runtime.session.isGenerating.get()) {
+          lastDom.addClass('pending-generation');
+        } else {
+          lastDom.removeClass('pending-generation');
+        }
       }
     }
   }
