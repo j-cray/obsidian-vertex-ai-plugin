@@ -351,8 +351,8 @@
     left: 0;
     width: 100%;
     background: transparent;
-    padding: 0 24px 80px 16px;
-    /* Lifted higher (80px) to clear status bar fully */
+    padding: 0 24px 56px 24px;
+    /* 32px Status Bar + 24px Gap = 56px. Left remains 16px or 24? User asked for 24 symmetric left. */
     /* Symmetric 24px Gaps (Left, Right, Bottom) */
     display: flex;
     flex-direction: column;
