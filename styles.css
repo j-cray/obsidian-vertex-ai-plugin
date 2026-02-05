@@ -389,14 +389,15 @@
 
     /* Border & Layout */
     border-radius: 24px;
-    padding: 10px 45px 10px 38px !important;
-    /* Forced 38px Left Padding */
+    padding: 9px 45px 9px 42px !important;
+    /* Vert center (9px), Left Gap (42px) */
     text-align: left !important;
     text-indent: 0 !important;
     color: var(--text-normal);
     min-height: 40px;
     max-height: 200px;
-    line-height: 1.4;
+    line-height: 1.5;
+    /* 14px * 1.5 = 21px text height. 21+18=39px total approx */
     font-size: 14px;
     overflow-y: auto;
 }
