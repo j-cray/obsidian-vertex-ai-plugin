@@ -14,12 +14,20 @@ export interface ChatResponse {
   acceptedModelId?: string; // The actual model used (e.g. for Auto mode)
 }
 
+export interface ChatAttachment {
+  type: 'image' | 'text' | 'file';
+  data: string; // Base64 for image, text content for text/file
+  mimeType?: string;
+  name?: string;
+}
+
 export interface ChatMessage {
   role: string;
   parts: { text: string }[];
   actions?: ToolAction[];
   thinking?: string;
   model?: string;
+  attachments?: ChatAttachment[]; // Persisted attachments
 }
 
 export interface Subagent {

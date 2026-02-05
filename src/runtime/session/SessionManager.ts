@@ -89,8 +89,8 @@ export class SessionManager {
   /**
    * Main entry point for user interaction
    */
-  public async sendMessage(text: string, externalSignal?: AbortSignal) {
-    if (!text.trim()) return;
+  public async sendMessage(text: string, attachments: ChatAttachment[] = [], externalSignal?: AbortSignal) {
+    if (!text.trim() && attachments.length === 0) return;
 
     // Cancel previous if any (though UI blocks this usually)
     if (this.abortController) {
@@ -104,13 +104,43 @@ export class SessionManager {
     this.setGenerating(true);
 
     // 1. Add User Message
-    const userMsg: ChatMessage = { role: 'user', parts: [{ text }] };
+    const userMsg: ChatMessage = {
+      role: 'user',
+      parts: [{ text }],
+      attachments: attachments
+    };
     this.addMessage(userMsg);
 
     try {
       // 2. Prepare Context
       const context = await this.runtime.vault.getRelevantContext(text);
-      const images = await this.runtime.vault.getActiveNoteImages();
+
+      // Process Attachments
+      const processedImages: any[] = [];
+      let attachedContext = "";
+
+      for (const att of attachments) {
+        if (att.type === 'image') {
+          // Ensure base64 is clean
+          const base64 = att.data.includes('base64,') ? att.data.split('base64,')[1] : att.data;
+          processedImages.push({
+            inlineData: {
+              data: base64,
+              mimeType: att.mimeType || 'image/jpeg'
+            }
+          });
+        } else if (att.type === 'file' || att.type === 'text') {
+          attachedContext += `\n\n[ATTACHED FILE: ${att.name}]\n${att.data}\n`;
+        }
+      }
+
+      // Combine attached text with prompt or context?
+      // It's better to append to prompt for visibility to the model as "part of the request".
+      const fullText = attachedContext ? `${text}\n${attachedContext}` : text;
+
+      // Existing images (from active note) - specific feature
+      const activeNoteImages = await this.runtime.vault.getActiveNoteImages();
+      const allImages = [...processedImages, ...activeNoteImages];
 
       // 3. Create placeholder AI message
       const aiMsg: ChatMessage = { role: 'model', parts: [{ text: '' }], actions: [] };
@@ -168,7 +198,8 @@ export class SessionManager {
         // Ignore if profile doesn't exist
       }
 
-      for await (const chunk of this.runtime.vertex.chat(text, context, this.runtime.vault, history, images, userProfile, this.runtime.tools, signal)) {
+      for await (const chunk of this.runtime.vertex.chat(fullText, context, this.runtime.vault, history, allImages, userProfile, this.runtime.tools, signal)) {
+
 
         if (signal?.aborted) break;
 

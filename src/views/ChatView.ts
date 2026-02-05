@@ -1,8 +1,8 @@
-import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, setIcon, Modal } from 'obsidian';
 import MastermindPlugin from '../main';
 import { MessageRenderer } from './MessageRenderer';
 import { AgentRuntime } from '../runtime/Runtime';
-import { ChatMessage } from '../types';
+import { ChatMessage, ChatAttachment } from '../types';
 import { HistoryModal } from './HistoryModal';
 
 
@@ -16,6 +16,11 @@ export class MastermindChatView extends ItemView {
   inputEl!: HTMLTextAreaElement;
   toolbarEl!: HTMLElement;
   modelLabel!: HTMLElement;
+
+  // Staged attachments
+  attachments: ChatAttachment[] = [];
+  chipsContainer!: HTMLElement;
+
 
 
   // Local state mirrored from store for rendering optimization if needed
@@ -131,15 +136,87 @@ export class MastermindChatView extends ItemView {
   renderInput(container: HTMLElement) {
 
     const inputWrapper = container.createDiv("chat-input-wrapper");
+
+    // Chips Container (Staging Area)
+    this.chipsContainer = inputWrapper.createDiv('chat-attachment-chips');
+    this.chipsContainer.style.display = 'none';
+
     const inputContainer = inputWrapper.createDiv("chat-input-container");
 
-    // Icons Overlay
-    const overlay = inputContainer.createDiv('chat-features-overlay');
-    // ... (Use same icons as before or simplify)
+    // --- LEFT FEATURES MENU ---
+    const featuresContainer = inputContainer.createDiv('chat-features-menu');
 
+    // The main "+" Toggle Button
+    const plusBtn = featuresContainer.createEl('button', { cls: 'chat-plus-button' });
+    plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+    plusBtn.title = "Add Attachment";
+
+    // The Pop-up Menu (Hidden by default)
+    const menuPopup = featuresContainer.createDiv('chat-plus-popup');
+    menuPopup.style.display = 'none';
+
+    const createMenuItem = (icon: string, title: string, onClick: () => void) => {
+      const btn = menuPopup.createEl('button', { cls: 'chat-plus-menu-item' });
+      btn.innerHTML = icon; // Expecting SVG string
+      btn.title = title;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        menuPopup.style.display = 'none'; // Close on select
+        plusBtn.removeClass('active');
+        onClick();
+      };
+      return btn;
+    };
+
+    // 1. File Upload
+    createMenuItem(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>',
+      "Attach File",
+      () => this.triggerFileSelect('all')
+    );
+
+    // 2. Image Upload
+    createMenuItem(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
+      "Upload Image",
+      () => this.triggerFileSelect('image')
+    );
+
+    // 3. Camera
+    createMenuItem(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>',
+      "Take Photo",
+      () => this.handleCamera()
+    );
+
+    // 4. Voice
+    createMenuItem(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>',
+      "Voice Input",
+      () => this.handleVoice()
+    );
+
+    // Toggle Menu
+    plusBtn.onclick = (e) => {
+      e.stopPropagation();
+      const isVisible = menuPopup.style.display !== 'none';
+      menuPopup.style.display = isVisible ? 'none' : 'flex';
+      if (!isVisible) plusBtn.addClass('active');
+      else plusBtn.removeClass('active');
+    };
+
+    // Close menu on outside click
+    document.addEventListener('click', (e) => {
+      if (menuPopup.style.display === 'flex') {
+        menuPopup.style.display = 'none';
+        plusBtn.removeClass('active');
+      }
+    });
+
+    // --- INPUT FIELD ---
     this.inputEl = inputContainer.createEl('textarea', {
       cls: 'chat-input',
-      attr: { rows: '1' }
+      attr: { rows: '1', placeholder: 'Ask Mastermind...' }
     });
 
     this.inputEl.addEventListener('input', () => {
@@ -155,27 +232,180 @@ export class MastermindChatView extends ItemView {
       }
     });
 
+    // --- RIGHT SEND BUTTON ---
     const sendButton = inputContainer.createEl('button', { cls: 'chat-send-button' });
 
     // Subscribe to generating state to update button
     this.runtime.session.isGenerating.subscribe((isGen) => {
       if (isGen) {
-        sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
+        // Red Square for Stop
+        sendButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="stop-icon"><rect x="6" y="6" width="12" height="12"></rect></svg>';
         sendButton.title = "Stop Generating";
+        sendButton.addClass('is-stop');
       } else {
-        sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        // Arrow for Send
+        sendButton.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         sendButton.title = "Send Message";
+        sendButton.removeClass('is-stop');
       }
     });
 
     sendButton.addEventListener('click', () => {
-      // TODO: Handle stop interaction
       if (this.runtime.session.isGenerating.get()) {
         this.runtime.session.abort();
       } else {
-
         this.onSendMessage();
       }
+    });
+  }
+
+  // --- MULTIMODAL HANDLERS ---
+
+  triggerFileSelect(mode: 'image' | 'all') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    if (mode === 'image') input.accept = 'image/*';
+
+    input.onchange = async () => {
+      if (input.files) {
+        for (let i = 0; i < input.files.length; i++) {
+          const file = input.files[i];
+          await this.readAndAttach(file);
+        }
+      }
+    };
+    input.click();
+  }
+
+  async readAndAttach(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (e.target?.result) {
+        const isImage = file.type.startsWith('image/');
+        const content = e.target.result.toString();
+
+        if (isImage) {
+          this.addAttachment({
+            type: 'image',
+            data: content, // Base64
+            mimeType: file.type,
+            name: file.name
+          });
+        } else {
+          // Text file assumption or read as text? FileReader readAsDataURL returns base64
+          // For text files we might want readAsText.
+          // But checking mime type safely is hard.
+          // Re-read as text if not image?
+          if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt') || file.name.endsWith('.ts') || file.name.endsWith('.js') || file.name.endsWith('.json')) {
+            const textReader = new FileReader();
+            textReader.onload = (ev) => {
+              if (ev.target?.result) {
+                this.addAttachment({
+                  type: 'file',
+                  data: ev.target.result.toString(),
+                  name: file.name,
+                  mimeType: file.type
+                });
+              }
+            }
+            textReader.readAsText(file);
+          } else {
+            new Notice(`Skipping binary file: ${file.name}`);
+          }
+        }
+      }
+    };
+
+    if (file.type.startsWith('image/')) {
+      reader.readAsDataURL(file);
+    } else {
+      // Trigger text logic above
+      reader.readAsDataURL(file); // Just to trigger "onload" but logic inside handles text re-read
+    }
+  }
+
+  handleCamera() {
+    // Create a modal for camera
+    // Simple HTML5 video element
+    // For now, simpler implementation:
+    // Use hidden input with capture="environment" -> mobile friendly
+    // On desktop, we need a modal.
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment'; // tries to use camera
+    input.onchange = async () => {
+      if (input.files && input.files[0]) {
+        await this.readAndAttach(input.files[0]);
+      }
+    }
+    input.click();
+  }
+
+  handleVoice() {
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      new Notice("Voice input not supported in this browser/environment.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    new Notice("Listening...");
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript) {
+        this.inputEl.value += (this.inputEl.value ? ' ' : '') + transcript;
+        // Trigger input event to resize
+        this.inputEl.dispatchEvent(new Event('input'));
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      new Notice("Voice recognition error: " + event.error);
+    };
+
+    recognition.start();
+  }
+
+  addAttachment(att: ChatAttachment) {
+    this.attachments.push(att);
+    this.renderChips();
+  }
+
+  removeAttachment(index: number) {
+    this.attachments.splice(index, 1);
+    this.renderChips();
+  }
+
+  renderChips() {
+    this.chipsContainer.empty();
+    if (this.attachments.length === 0) {
+      this.chipsContainer.style.display = 'none';
+      return;
+    }
+    this.chipsContainer.style.display = 'flex';
+
+    this.attachments.forEach((att, idx) => {
+      const chip = this.chipsContainer.createDiv('attachment-chip');
+
+      let icon = '';
+      if (att.type === 'image') icon = '🖼️'; // or svg
+      else if (att.type === 'file') icon = '📄';
+      else icon = '📎';
+
+      chip.createEl('span', { text: `${icon} ${att.name || 'Attachment'}` });
+
+      const close = chip.createEl('button', { cls: 'chip-close' });
+      close.innerHTML = '×';
+      close.onclick = () => this.removeAttachment(idx);
     });
   }
 
@@ -331,7 +561,11 @@ export class MastermindChatView extends ItemView {
     this.inputEl.value = '';
 
     // Call Runtime
-    await this.runtime.session.sendMessage(text);
+    await this.runtime.session.sendMessage(text, this.attachments);
+
+    // Clear Attachments
+    this.attachments = [];
+    this.renderChips();
   }
 
   async onClose() {
