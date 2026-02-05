@@ -128,7 +128,8 @@
     overflow-y: auto;
     overflow-x: hidden;
     /* Prevent horizontal scroll */
-    padding: 60px 20px 20px 20px;
+    padding: 60px 20px 100px 20px;
+    /* Increased bottom padding for floating input */
     display: flex;
     flex-direction: column;
     gap: 24px;
@@ -343,16 +344,24 @@
 
 
 
-/* INPUT AREA FIXES */
+/* INPUT AREA FIXES - TRUE FLOATING */
 .chat-input-wrapper {
+    position: absolute;
+    /* Float over the list */
+    bottom: 0;
+    left: 0;
+    width: 100%;
     background: transparent;
-    padding: 0 16px 40px 16px;
-    /* Lifted higher (40px) */
-    position: relative;
+    /* Ensure pass-through */
+    padding: 0 16px 20px 16px;
+    /* Floating positioning */
     display: flex;
     flex-direction: column;
     gap: 8px;
-    flex-shrink: 0;
+    z-index: 20;
+    /* Above messages */
+    pointer-events: none;
+    /* Let clicks pass through the gap */
 }
 
 .chat-input-container {
@@ -360,15 +369,58 @@
     width: 100%;
     display: flex;
     align-items: center;
-    /* Center items vertically */
-    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    /* Springy expand */
+    pointer-events: auto;
+    /* Re-enable for input */
+    transition: transform 0.2s ease-out;
 }
 
-/* Expansion Effect on Hover/Focus */
+/* Moderate Expansion on Hover/Focus */
 .chat-input-container:hover,
 .chat-input-container:focus-within {
-    transform: scale(1.02);
+    transform: scale(1.01);
+    /* Reduced from 1.02 */
+}
+
+/* Match Model Indicator Style (Glassmorphism) */
+.chat-input {
+    flex-grow: 1;
+    width: 100%;
+    resize: none;
+
+    /* Base Glass Style */
+    backdrop-filter: blur(4px);
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+
+    /* Border & Layout */
+    border-radius: 24px;
+    padding: 10px 45px 10px 45px;
+    /* Compact padding */
+    color: var(--text-normal);
+    min-height: 40px;
+    /* Slightly taller than 38px to match chip feel */
+    max-height: 200px;
+    line-height: 1.4;
+    font-size: 14px;
+    overflow-y: auto;
+}
+
+/* Theme-specific backgrounds matching .model-picker-container */
+.theme-dark .chat-input {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.theme-light .chat-input {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Hover/Focus States */
+.chat-input:hover,
+.chat-input:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    /* Maintain background opacity */
 }
 
 /* LEFT MENU (+ Button) - ABSOLUTE OVERLAY */
@@ -377,7 +429,6 @@
     left: 8px;
     top: 50%;
     transform: translateY(-50%);
-    /* Perfectly centered */
     width: 32px;
     height: 32px;
     display: flex;
@@ -388,12 +439,10 @@
 
 .chat-plus-button {
     width: 24px;
-    /* Smaller */
     height: 24px;
     border-radius: 50%;
     border: 1px solid var(--text-muted);
     background: transparent !important;
-    /* Force Transparent */
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
@@ -405,16 +454,17 @@
 
 .chat-plus-button svg {
     width: 14px;
-    /* Smaller glyph */
     height: 14px;
     stroke-width: 2px;
 }
 
+/* Harmonized Hover */
+.chat-input-container:hover .chat-plus-button,
 .chat-plus-button:hover,
 .chat-plus-button.active {
-    transform: scale(1.1);
     color: var(--text-normal);
     border-color: var(--interactive-accent);
+    /* No scale on button itself to avoid conflict, container scales */
 }
 
 .chat-plus-popup {
@@ -427,38 +477,62 @@
     z-index: 100;
     align-items: center;
     padding-bottom: 8px;
+    pointer-events: auto;
 }
 
-/* INPUT FIELD */
-.chat-input {
-    flex-grow: 1;
-    width: 100%;
-    resize: none;
-    background: var(--background-secondary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 24px;
-
-    /* Compact Padding */
-    /* Left: 8px margin + 24px button + 8px gap = 40px */
-    padding: 8px 45px 8px 45px;
-
-    color: var(--text-normal);
-    min-height: 38px;
-    /* Reduced height */
-    max-height: 200px;
-    line-height: 1.4;
-    font-size: 14px;
-    overflow-y: auto;
-    transition: border-color 0.2s, box-shadow 0.2s;
+/* Thin Glyphs, Transparent, Circular Border */
+.chat-plus-menu-item {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: transparent;
+    /* Transparent background */
+    backdrop-filter: blur(10px);
+    /* Mild blur for readability */
+    border: 1px solid var(--text-muted);
+    /* Tight circular border */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+    animation: popup-bounce 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-/* No BG change on hover, maintain expansion via container */
-.chat-input:hover,
-.chat-input:focus {
+.theme-dark .chat-plus-menu-item {
+    background: rgba(0, 0, 0, 0.6);
+    /* Slight tint for contrast */
+}
+
+.theme-light .chat-plus-menu-item {
+    background: rgba(255, 255, 255, 0.8);
+}
+
+.chat-plus-menu-item svg {
+    stroke-width: 1.5px;
+    /* Thinner glyphs */
+    width: 20px;
+    height: 20px;
+}
+
+.chat-plus-menu-item:hover {
     border-color: var(--interactive-accent);
-    background: var(--background-secondary);
-    /* Stable BG */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    color: var(--interactive-accent);
+    transform: scale(1.1);
+}
+
+@keyframes popup-bounce {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.8);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 /* SEND BUTTON */
@@ -467,11 +541,9 @@
     right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    /* Centered */
     background: transparent !important;
     border: none !important;
     width: 28px;
-    /* Slightly smaller */
     height: 28px;
     cursor: pointer;
     display: flex;
@@ -484,13 +556,19 @@
     transition: transform 0.2s;
 }
 
+.chat-send-button svg {
+    width: 20px;
+    height: 20px;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+
 .chat-send-button.is-stop {
     color: var(--text-error) !important;
 }
 
 .chat-send-button:hover {
     transform: translateY(-50%) scale(1.1);
-    /* Modify transform correctly */
     color: var(--text-normal);
 }
 

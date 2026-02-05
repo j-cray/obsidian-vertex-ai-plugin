@@ -76,11 +76,17 @@ export class MastermindChatView extends ItemView {
     // Model Indicator
     const modelContainer = this.toolbarEl.createDiv('model-picker-container');
     this.modelLabel = modelContainer.createEl('span', { cls: 'model-indicator' });
-    this.modelLabel.innerText = this.plugin.settings.modelId || 'gemini-2.0-flash-exp';
+    const modelId = this.plugin.settings.modelId || 'gemini-2.0-flash-exp';
+    const displayModel = this.plugin.settings.routerModel === 'smart' ? 'auto' : modelId;
+    this.modelLabel.innerText = `model: ${displayModel}`;
     this.modelLabel.title = "Current Model (Click to Settings)";
 
     this.plugin.onSettingsChange(() => {
-      if (this.modelLabel) this.modelLabel.innerText = this.plugin.settings.modelId;
+      if (this.modelLabel) {
+        const mId = this.plugin.settings.modelId;
+        const dM = this.plugin.settings.routerModel === 'smart' ? 'auto' : mId;
+        this.modelLabel.innerText = `model: ${dM}`;
+      }
     });
 
     this.modelLabel.onclick = () => {
