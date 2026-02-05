@@ -389,15 +389,15 @@
 
     /* Border & Layout */
     border-radius: 24px;
-    padding: 9px 45px 9px 42px !important;
-    /* Vert center (9px), Left Gap (42px) */
+    padding: 10px 45px 9px 44px !important;
+    /* Top 10 (+1), Left 44 (+2), Bot 9, Right 45 */
     text-align: left !important;
     text-indent: 0 !important;
     color: var(--text-normal);
     min-height: 40px;
     max-height: 200px;
     line-height: 1.5;
-    /* 14px * 1.5 = 21px text height. 21+18=39px total approx */
+    /* 21px height. 21+19 = 40px exact match */
     font-size: 14px;
     overflow-y: auto;
 }
