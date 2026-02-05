@@ -347,30 +347,26 @@
 /* INPUT AREA FIXES - TRUE FLOATING */
 .chat-input-wrapper {
     position: absolute;
-    /* Float over the list */
     bottom: 0;
     left: 0;
     width: 100%;
     background: transparent;
-    /* Ensure pass-through */
-    padding: 0 16px 20px 16px;
-    /* Floating positioning */
+    padding: 0 24px 60px 16px;
+    /* Lifted higher (60px), Right padding (24px) for scrollbar gap */
     display: flex;
     flex-direction: column;
     gap: 8px;
     z-index: 20;
-    /* Above messages */
     pointer-events: none;
-    /* Let clicks pass through the gap */
 }
 
 .chat-input-container {
     position: relative;
     width: 100%;
+    /* Will respect wrapper padding */
     display: flex;
     align-items: center;
     pointer-events: auto;
-    /* Re-enable for input */
     transition: transform 0.2s ease-out;
 }
 
@@ -378,7 +374,6 @@
 .chat-input-container:hover,
 .chat-input-container:focus-within {
     transform: scale(1.01);
-    /* Reduced from 1.02 */
 }
 
 /* Match Model Indicator Style (Glassmorphism) */
@@ -394,10 +389,8 @@
     /* Border & Layout */
     border-radius: 24px;
     padding: 10px 45px 10px 45px;
-    /* Compact padding */
     color: var(--text-normal);
     min-height: 40px;
-    /* Slightly taller than 38px to match chip feel */
     max-height: 200px;
     line-height: 1.4;
     font-size: 14px;
@@ -438,8 +431,9 @@
 }
 
 .chat-plus-button {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    /* Standardize Size */
+    height: 28px;
     border-radius: 50%;
     border: 1px solid var(--text-muted);
     background: transparent !important;
@@ -453,8 +447,9 @@
 }
 
 .chat-plus-button svg {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    /* Maximize Glyph */
+    height: 18px;
     stroke-width: 2px;
 }
 
@@ -480,17 +475,17 @@
     pointer-events: auto;
 }
 
-/* Thin Glyphs, Transparent, Circular Border */
+/* Uniform Buttons for Menu Items */
 .chat-plus-menu-item {
-    width: 40px;
-    height: 40px;
+    width: 28px;
+    /* Match + Button Size */
+    height: 28px;
     border-radius: 50%;
-    background: transparent;
-    /* Transparent background */
-    backdrop-filter: blur(10px);
-    /* Mild blur for readability */
+
+    /* Inherit Glassmorphism from Input Bar via CSS Variables or Duplication */
+    backdrop-filter: blur(4px);
     border: 1px solid var(--text-muted);
-    /* Tight circular border */
+
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     display: flex;
     align-items: center;
@@ -501,20 +496,24 @@
     animation: popup-bounce 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+/* Match Input Bar Backgrounds exactly */
 .theme-dark .chat-plus-menu-item {
-    background: rgba(0, 0, 0, 0.6);
-    /* Slight tint for contrast */
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.05);
+    /* Match inactive input border */
 }
 
 .theme-light .chat-plus-menu-item {
-    background: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.65);
+    border-color: rgba(0, 0, 0, 0.08);
 }
 
+/* Maximize Glyph Size */
 .chat-plus-menu-item svg {
     stroke-width: 1.5px;
-    /* Thinner glyphs */
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    /* Max safe size within 28px circle */
+    height: 18px;
 }
 
 .chat-plus-menu-item:hover {
