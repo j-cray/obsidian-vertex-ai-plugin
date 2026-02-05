@@ -351,8 +351,8 @@
     left: 0;
     width: 100%;
     background: transparent;
-    padding: 0 24px 60px 16px;
-    /* Lifted higher (60px), Right padding (24px) for scrollbar gap */
+    padding: 0 24px 24px 24px;
+    /* Symmetric 24px Gaps (Left, Right, Bottom) */
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -466,6 +466,7 @@
     position: absolute;
     bottom: 40px;
     left: 0;
+    /* Aligned with parent (chat-features-menu center) */
     display: flex;
     flex-direction: column-reverse;
     gap: 8px;
@@ -473,6 +474,8 @@
     align-items: center;
     padding-bottom: 8px;
     pointer-events: auto;
+    width: 100%;
+    /* Ensure correct centering relative to parent */
 }
 
 /* Uniform Buttons for Menu Items */
@@ -508,11 +511,12 @@
     border-color: rgba(0, 0, 0, 0.08);
 }
 
-/* Maximize Glyph Size */
+/* Maximize Glyph Size - Match + Glyph */
 .chat-plus-menu-item svg {
-    stroke-width: 1.5px;
+    stroke-width: 2px;
+    /* Match + button thickness */
     width: 18px;
-    /* Max safe size within 28px circle */
+    /* Match + button size (Max safe) */
     height: 18px;
 }
 
