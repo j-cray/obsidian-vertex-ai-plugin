@@ -346,13 +346,13 @@
 /* INPUT AREA FIXES */
 .chat-input-wrapper {
     background: transparent;
-    padding: 16px;
-    padding-bottom: 30px;
-    /* Nudge up from status bar */
+    padding: 0 16px 20px 16px;
+    /* Floating up slightly from bottom */
     position: relative;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .chat-input-container {
@@ -361,97 +361,64 @@
     display: flex;
     align-items: flex-end;
     /* Align bottom */
-    gap: 8px;
 }
 
-/* STAGED CHIPS */
-.chat-attachment-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 4px 8px;
-}
-
-.attachment-chip {
-    background: var(--background-secondary-alt);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
-    padding: 4px 10px;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-normal);
-    animation: fade-in 0.2s ease;
-}
-
-.chip-close {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0;
-    line-height: 1;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-}
-
-.chip-close:hover {
-    color: var(--text-error);
-}
-
-/* LEFT MENU (+ Button) */
+/* LEFT MENU (+ Button) - ABSOLUTE OVERLAY */
 .chat-features-menu {
-    position: relative;
-    width: 40px;
-    height: 48px;
-    /* Match input min-height */
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    /* Inside the input bar */
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
+    z-index: 10;
 }
 
 .chat-plus-button {
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     border: 1px solid var(--text-muted);
     /* Thin circular border */
     background: transparent;
+    /* Transparent as requested */
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: all 0.2s ease;
     padding: 0;
-    z-index: 6;
+}
+
+.chat-plus-button svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2px;
 }
 
 .chat-plus-button:hover,
 .chat-plus-button.active {
     transform: scale(1.1);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     color: var(--text-normal);
     border-color: var(--interactive-accent);
-    background: var(--background-primary);
 }
 
 .chat-plus-popup {
     position: absolute;
-    bottom: 50px;
+    bottom: 40px;
     /* Above the button */
     left: 0;
-    /* Center aligned to button somewhat */
     display: flex;
     flex-direction: column-reverse;
     /* Stack upwards */
-    gap: 12px;
+    gap: 8px;
     z-index: 100;
     align-items: center;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
 }
 
 .chat-plus-menu-item {
@@ -491,25 +458,31 @@
 /* INPUT FIELD */
 .chat-input {
     flex-grow: 1;
+    width: 100%;
     resize: none;
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 20px;
-    /* More rounded */
-    padding: 12px 50px 12px 16px;
-    /* Right padding for send button */
+    border-radius: 24px;
+    /* More pill-shaped */
+
+    /* Padding Buffer */
+    /* Left: 6px margin + 32px button + 6px gap = ~44px */
+    padding: 12px 50px 12px 48px;
+
     color: var(--text-normal);
-    min-height: 48px;
-    max-height: 150px;
+    min-height: 44px;
+    /* Slightly compact */
+    max-height: 200px;
     line-height: 1.5;
     font-size: 15px;
     overflow-y: auto;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chat-input:focus {
     border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    /* Floating shadow */
 }
 
 /* SEND BUTTON (Fixed Color) */
