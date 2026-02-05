@@ -12,6 +12,7 @@ export interface ChatResponse {
   thinkingText?: string; // The content of the thinking block
   usage?: { input: number; output: number };
   acceptedModelId?: string; // The actual model used (e.g. for Auto mode)
+  routingReason?: string; // Explanation for why the model/strategy was chosen
 }
 
 export interface ChatAttachment {
@@ -27,6 +28,7 @@ export interface ChatMessage {
   actions?: ToolAction[];
   thinking?: string;
   model?: string;
+  routingReason?: string;
   attachments?: ChatAttachment[]; // Persisted attachments
 }
 

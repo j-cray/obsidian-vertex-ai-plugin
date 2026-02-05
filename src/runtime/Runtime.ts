@@ -14,6 +14,7 @@ import { VaultReader, VaultLister } from '../tools/VaultReader';
 import { VaultSearch } from '../tools/VaultSearch';
 import { VaultWriter } from '../tools/VaultWriter';
 import { PlanTool } from '../tools/PlanTool';
+import { GraphLinkedNotes, GraphBacklinks } from '../tools/GraphAnalysisTool';
 
 
 
@@ -62,6 +63,8 @@ export class AgentRuntime {
     this.tools.register(new VaultSearch(this));
     this.tools.register(new VaultWriter(this));
     this.tools.register(new PlanTool(this));
+    this.tools.register(new GraphLinkedNotes(this));
+    this.tools.register(new GraphBacklinks(this));
 
 
 

@@ -544,23 +544,12 @@ export class VertexService {
         // "You are Mastermind... \n\n[SUBAGENT OVERRIDE]: You are acting as 'Coding Partner'..."
         const overlay = `\n\n[ACTING AS: ${decision.subagent.name}]\n${decision.subagent.systemPrompt}`;
         // We'll inject this when we build systemInstructionText below
-        // Store it temporarily in a way we can access, or just modify 'this.customContextPrompt' ?
-        // No, customContextPrompt is persistent state. We should modify a local variable.
-        // Let's modify the prompt? No, system instruction.
-
-        // Passed to context?
-        // context string in args is usually the vault context.
-        // 'userProfile' is passed.
-
-        // We need to append it to the systemInstructionText which is defined inside the try block.
-        // Let's store it in a local var here.
         var subagentContext = overlay;
       }
+
+      modelId = decision.modelId;
+      var routingReason = decision.reason;
     }
-
-
-
-
 
     try {
       const client = this.getVertexClient();
@@ -642,17 +631,19 @@ export class VertexService {
 
       const tools: any[] = [{ function_declarations: functionDeclarations }];
 
-      // FIX: "Multiple tools are supported only when they are all search tools"
-      // If we have function declarations, we CANNOT mix in googleSearch unless we are very careful (and usually not at all with current API).
-      // Since we have 'fetch_url' as a custom tool, we should rely on that or other Tools.
-      // We explicitly disable googleSearch object here to prevent the conflict.
-
-      /*
+      // 5. Native Google Search Grounding
       if (this.permWeb) {
-         // Enable Native Google Search Grounding
-         // tools.push({ googleSearch: {} });
+        // Only enable native grounding for models that support it well (Gemini 2.0/Pros)
+        // Router ensures we pick a capable model if search intent is detected.
+        // We broadly enable it for 2.0+ models or if explicitly requested via routing.
+
+        // Check if model is capable (simple heuristic based on ID)
+        const isModern = modelId.includes('2.0') || modelId.includes('3.0') || modelId.includes('1.5-pro');
+
+        if (isModern) {
+          tools.push({ googleSearch: {} });
+        }
       }
-      */
 
 
       // Build request contents fresh to avoid leaking non-Vertex fields (e.g., actions) from history
