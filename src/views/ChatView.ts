@@ -216,7 +216,7 @@ export class MastermindChatView extends ItemView {
     // --- INPUT FIELD ---
     this.inputEl = inputContainer.createEl('textarea', {
       cls: 'chat-input',
-      attr: { rows: '1', placeholder: 'Ask Mastermind...' }
+      attr: { rows: '1' }
     });
 
     this.inputEl.addEventListener('input', () => {
