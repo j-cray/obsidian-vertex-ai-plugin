@@ -298,25 +298,48 @@
 }
 
 /* Code Block Cards - Slick & Contained */
-.chat-message pre {
+/* Code Block Cards - Slick & Contained */
+.chat-message pre,
+.agent-activity-log {
     display: block;
     width: 100%;
+    /* Fill container */
+    max-width: 100%;
+    /* STRICT Constraint */
     margin: 8px 0;
     padding: 12px;
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.2);
-    /* Darker backdrop for code */
     border: 1px solid rgba(255, 255, 255, 0.1);
-    white-space: pre-wrap;
-    /* Wrap long lines OR use pre with scroll */
-    word-wrap: break-word;
-    /* Ensure wrapping */
-    overflow-x: auto;
-    /* Scroll if absolutely necessary */
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.1);
+
+    /* Font & Layout */
     font-family: var(--font-monospace);
     font-size: 0.85em;
-    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.1);
+
+    /* Overflow Handling - CRITICAL */
+    white-space: pre-wrap;
+    /* Wrap text if possible */
+    word-wrap: break-word;
+    /* Break long words */
+    overflow-x: auto;
+    /* Scroll if it refuses to wrap */
+    box-sizing: border-box;
+    /* Include padding in width */
 }
+
+/* Ensure parents don't let children expand */
+.chat-message-content,
+.chat-text-content {
+    min-width: 0;
+    /* Allow flex child to shrink below content size */
+    overflow-wrap: break-word;
+    word-break: break-word;
+    /* Prevent long strings from expanding parent */
+    width: 100%;
+    /* Ensure it fills available flex space */
+}
+
 
 /* Inline Code - Chips */
 .chat-message code {
