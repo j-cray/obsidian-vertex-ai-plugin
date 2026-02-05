@@ -389,8 +389,8 @@
 
     /* Border & Layout */
     border-radius: 24px;
-    padding: 10px 45px 9px 44px !important;
-    /* Top 10 (+1), Left 44 (+2), Bot 9, Right 45 */
+    padding: 11px 45px 8px 44px !important;
+    /* Nudged down 1px: Top 11, Bot 8 */
     text-align: left !important;
     text-indent: 0 !important;
     color: var(--text-normal);
