@@ -389,8 +389,10 @@
 
     /* Border & Layout */
     border-radius: 24px;
-    padding: 10px 45px 10px 38px;
-    /* Button ends at 36px, tight 2px gap */
+    padding: 10px 45px 10px 38px !important;
+    /* Forced 38px Left Padding */
+    text-align: left !important;
+    text-indent: 0 !important;
     color: var(--text-normal);
     min-height: 40px;
     max-height: 200px;
