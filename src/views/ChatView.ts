@@ -478,10 +478,11 @@ export class MastermindChatView extends ItemView {
     // Handle empty state
     if (messages.length === 0) {
       this.messageContainer.empty();
+      const aiAvatar = this.getAvatarForModel(this.plugin.settings.modelId);
       this.messageRenderer.renderAIMessage({
         role: 'model',
         parts: [{ text: 'Greetings. I am Mastermind. Ready.' }]
-      } as ChatMessage, this.plugin.settings.profilePictureAI).then(el => {
+      } as ChatMessage, aiAvatar).then(el => {
         if (el.parentElement) el.parentElement.addClass('empty-state-greeting');
       });
       return;
@@ -489,73 +490,64 @@ export class MastermindChatView extends ItemView {
 
 
     // Naive Diffing:
-    // If we have more messages than DOM nodes, append.
-    // If same number, update the last one (assuming it's the only one changing during streaming).
     const domMessages = this.messageContainer.querySelectorAll('.chat-message-block');
     let domCount = domMessages.length;
 
-    // Check if the only message is the empty state greeting, if so treat as empty
+    // Check if the only message is the empty state greeting
     if (domCount === 1 && domMessages[0].classList.contains('empty-state-greeting')) {
-      this.messageContainer.empty(); // Clear greeting
+      this.messageContainer.empty();
       domCount = 0;
     }
 
-    // If completely new chat (or clear), reset
-    if (domCount === 0 && messages.length > 0) {
+    // 1. Append New Messages
+    for (let i = domCount; i < messages.length; i++) {
+      const msg = messages[i];
+      const avatarUrl = msg.role === 'user'
+        ? this.plugin.settings.profilePictureUser
+        : this.getAvatarForModel(msg.model || this.plugin.settings.modelId);
 
-      this.messageContainer.empty();
-      messages.forEach(msg => this.appendMessage(msg));
-    } else if (messages.length > domCount) {
-      // Append new messages
-      for (let i = domCount; i < messages.length; i++) {
-        this.appendMessage(messages[i], i === messages.length - 1 && this.runtime.session.isGenerating.get());
+      if (msg.role === 'user') {
+        this.messageRenderer.renderUserMessage(msg, avatarUrl);
+      } else {
+        // Check if this new message should pulse (is generating)
+        const isLastAndGenerating = (i === messages.length - 1 && this.runtime.session.isGenerating.get());
+        this.messageRenderer.renderAIMessage(msg, avatarUrl).then(content => {
+          // content is the content-container. parent is the block.
+          if (isLastAndGenerating && content.parentElement) {
+            content.parentElement.addClass('pending-generation');
+          }
+        });
       }
-    } else if (messages.length === domCount) {
+    }
 
-      // Update the last message only (Streaming case)
-      const lastMsgIndex = messages.length - 1;
-      const lastMsg = messages[lastMsgIndex];
-      const lastDom = domMessages[domCount - 1] as HTMLElement;
+    // 2. Update Existing Messages (Streaming)
+    // We mainly care about the last message if it's currently streaming/updating.
+    if (messages.length > 0 && messages.length === domCount) {
+      const lastIndex = messages.length - 1;
+      const lastMsg = messages[lastIndex];
+      const lastDom = domMessages[domMessages.length - 1] as HTMLElement; // Map last to last
 
-      this.messageRenderer.updateMessage(lastDom, lastMsg,
-        lastMsg.role === 'user' ? this.plugin.settings.profilePictureUser : this.plugin.settings.profilePictureAI
-      );
+      const avatarUrl = lastMsg.role === 'user'
+        ? this.plugin.settings.profilePictureUser
+        : this.getAvatarForModel(lastMsg.model || this.plugin.settings.modelId);
 
-      // Toggle Pulse Animation
+      this.messageRenderer.updateMessage(lastDom, lastMsg, avatarUrl);
+
+      // Sync Pulse State
       if (this.runtime.session.isGenerating.get()) {
         lastDom.addClass('pending-generation');
       } else {
         lastDom.removeClass('pending-generation');
       }
     }
-
-
-    // Scroll to bottom logic could be smarter (only if near bottom)
-    // For now, keep simple
-    // const last = this.messageContainer.lastElementChild;
-    // if (last) last.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
-  appendMessage(msg: ChatMessage, isPending: boolean = false) {
-    let dom: HTMLElement | undefined;
-    if (msg.role === 'user') {
-      // renderUserMessage returns promise<HTMLElement>
-      // We need to handle this async or just let it float?
-      // Typescript might complain about void return.
-      // Ideally renderUserMessage shouldn't be async if possible, or we await.
-      // But appendMessage is sync called.
-      // Let's ignore the promise for now or fire-and-forget, but for Pulse we need the DOM.
-      // MessageRenderer.renderAIMessage returns Promise<HTMLElement> (contentContainer).
-      // We need the parent block.
+  getAvatarForModel(modelId: string): string {
+    // If it's a "Mastermind" system message or default/auto, use default AI pic
+    if (!modelId || modelId === 'auto') return this.plugin.settings.profilePictureAI;
 
-      this.messageRenderer.renderUserMessage(msg, this.plugin.settings.profilePictureUser);
-    } else {
-      this.messageRenderer.renderAIMessage(msg, this.plugin.settings.profilePictureAI).then(content => {
-        if (isPending && content.parentElement) {
-          content.parentElement.addClass('pending-generation');
-        }
-      });
-    }
+    // Otherwise, generate unique avatar for the specific model
+    return `https://api.dicebear.com/9.x/bottts/svg?seed=${modelId}`;
   }
 
 

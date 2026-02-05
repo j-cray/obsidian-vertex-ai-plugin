@@ -93,6 +93,12 @@ export class MessageRenderer {
    * Updates an existing message DOM element with new data (Streaming).
    */
   async updateMessage(dom: HTMLElement, msg: import('../types').ChatMessage, avatarUrl: string) {
+    // 0. Update Avatar
+    const avatar = dom.querySelector('.chat-avatar') as HTMLImageElement;
+    if (avatar && avatar.src !== avatarUrl) {
+      avatar.src = avatarUrl;
+    }
+
     const contentContainer = dom.querySelector('.chat-message-content') as HTMLElement;
     if (!contentContainer) return; // Should not happen for AI messages
 

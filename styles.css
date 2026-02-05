@@ -139,14 +139,27 @@
 
 .chat-message-block {
     display: flex;
-    gap: 12px;
+    margin-bottom: 24px;
     align-items: flex-start;
-    /* Align avatars to top of message */
+    /* Pin Avatars to Top */
+    gap: 12px;
+    position: relative;
+    /* Ensure z-index context */
     max-width: 100%;
 }
 
+/* AI Message Layout */
+.message-block-ai {
+    flex-direction: row;
+    padding-right: 48px;
+    /* Prevent full width */
+}
+
+/* User Message Layout */
 .message-block-user {
     flex-direction: row-reverse;
+    justify-content: flex-start;
+    padding-left: 48px;
 }
 
 .chat-avatar {
